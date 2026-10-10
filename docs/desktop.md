@@ -66,6 +66,43 @@ pi 的 RPC 客户端用的是裸命令 `node`（`@earendil-works/pi-coding-agent
 - macOS 上关掉窗口应用仍然活着（平台习惯如此），**Cmd+Q** 才是退出；退出时服务端
   和它下面的 pi 进程一并结束。
 
+## 通知与红点
+
+会话在后台跑完时桌面版会发一条系统通知，**点它还原并聚焦窗口、打开那个会话**；
+Dock（macOS）、任务栏（Windows）与 Unity 启动器（Linux）上的红点显示「已完成但还没
+打开」的会话数，打开一个就减一。
+
+通知与红点都是**主进程**做的：它们属于操作系统，而且点击必须由主进程转回渲染进程。
+所以 `desktop/src/preload.cts` 除了那几项数据，另外开了三个函数：
+
+| 函数 | 方向 | 作用 |
+|---|---|---|
+| `notify({ title, body, tag })` | 页面 → 主进程 | 弹一条系统通知；`tag` 就是会话路径，同一会话的新通知会替掉旧的 |
+| `setBadge(count)` | 页面 → 主进程 | 设置红点数字，`0` 清空 |
+| `onNotificationClick(listener)` | 主进程 → 页面 | 通知被点击，参数是那条通知的 `tag`；返回取消订阅的函数 |
+
+`ipcRenderer` 不出 preload，页面拿到的仍然只有几个函数（与 `getPathForFile` 同一规矩）。
+
+红点的数字来自 `web/src/lib/app-state.ts` 里对 `appStore` 的一个订阅，来源就是侧栏那批
+`done` 标记，所以打开会话、删除会话、进程退出都会跟着变，不需要另一套账本。
+
+**Windows 上没有数字徽标 API**：`app.setBadgeCount`（macOS / Linux 用它）在 Windows
+不起作用，只能给 `BrowserWindow.setOverlayIcon` 一张位图。那张位图不随包分发，而是
+`desktop/src/badge-overlay.cts` 现场画的——`nativeImage.createFromBitmap` 直接吃裸
+BGRA 像素，所以既不需要图片编码器，也不需要多一个资源文件；超过 9 显示成「9+」。
+
+**macOS 的通知要求应用有真正的签名。** Electron 42 起 macOS 走的是 `UNNotification`，
+它拒绝「只有链接器签名」的二进制，而 `node_modules` 里那份 `Electron.app` 正是这一种
+（`flags=0x20002(adhoc,linker-signed)`）。于是 `Notification#show()` 会静默地走
+`failed` 分支——`notification.isSupported()` 依旧返回 `true`，从界面上看就是「什么都
+没发生」。所以开发脚本会先做一次 ad-hoc 重签（`desktop/scripts/sign-dev-electron.mjs`），
+打包时由 `electron-builder.config.mjs` 的 `afterPack` 对成品做同一件事——
+`mac.identity: null` 的意思是「不去找证书」，不是「不要签名」。主进程也会把 `failed`
+事件写进 stderr，这类失败不再无声无息。
+
+ad-hoc 签名的指纹会随每一次构建变化，所以**升级安装包之后 macOS 可能把通知授权当成
+一个新应用再问一次**——不发证书就避不开这一点。
+
 ## 从源码打包
 
 ```sh
@@ -87,7 +124,8 @@ pnpm --filter pi-web-simple-desktop run package -- --no-build   # 跳过 pnpm bu
 四步流水线（`desktop/scripts/package.mjs`）：
 
 1. 仓库根 `pnpm build`——构建前端、编译后端；
-2. `prepare-app.mjs`——把 `server/build`、`web/dist`、`main.cjs`、`preload.cjs`、`LICENSE`、
+2. `prepare-app.mjs`——把 `server/build`、`web/dist`、`main.cjs`、`preload.cjs`、
+   `badge-overlay.cjs`、`LICENSE`、
    `THIRD_PARTY_NOTICES.md` 组装成「应用目录」，再用一次干净的 `npm install --omit=dev` 装
    唯一那个运行时依赖（pi 内核）。**不用 pnpm 的 workspace 链接**：那是指向仓库外 store 的
    符号链接，打包器收不了；
@@ -145,6 +183,10 @@ Node，默认用宿主 PATH 上的 `node`。
   子进程（dsh 用 job object 兜住了这一点，这里没做）。macOS/Linux 上是正常的：服务端收到
   SIGTERM 后先停会话再退出。
 - **未签名**：如上，首次打开需要手动放行；也无法公证（notarize）。
+- **通知归系统管**：首次弹通知时 macOS / Windows 会问一次授权，之后在系统设置里被关掉
+  就不再出现；开发模式（`pnpm dev:desktop`）下通知的发送者显示为 Electron 而不是本应用。
+- **macOS 的授权会跟着签名走**：ad-hoc 签名的指纹每次构建都变，所以升级安装包后可能被
+  重新问一次通知授权（原因见上面「通知与红点」）。
 - **体积**：自带 Node 运行时（解压后约 108 MB）与完整依赖树，装完约 490 MB，
   dmg 约 180 MB。换来的是一台干净机器上双击即用。
 - **asar 关闭**：打包时的 `asar: false`。服务端产物是 ESM，asar 里的 ESM 解析、

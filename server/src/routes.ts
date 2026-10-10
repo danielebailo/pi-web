@@ -3,7 +3,7 @@ import { createReadStream, existsSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { pipeline } from "node:stream/promises";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { SessionManager, type RpcClient } from "@earendil-works/pi-coding-agent";
 import { wantsFrame, type EventBus } from "./bus.ts";
 import { BUILTIN_COMMANDS, runBuiltinCommand } from "./commands.ts";
 import { badRequest, forbidden, HttpError, notFound } from "./errors.ts";
@@ -48,6 +48,7 @@ import {
 import { TerminalManager, type TerminalHost } from "./terminal.ts";
 import { pendingUiRequests, type PendingUiRequests } from "./ui-requests.ts";
 import {
+  THINKING_LEVELS,
   readComposerFromClient,
   readComposerFromDefaults,
   readComposerFromDisk,
@@ -271,6 +272,19 @@ function optionalModel(body: Record<string, unknown>): { provider: string; id: s
 }
 
 /**
+ * The hero's thinking-level choice, or null when nothing was picked.
+ *
+ * Same shape and reasoning as `optionalModel`: absent means "let pi decide",
+ * which is not the same request as naming a level, and a present but unknown
+ * value is the caller's mistake rather than something to ignore.
+ */
+function optionalThinkingLevel(body: Record<string, unknown>): string | null {
+  const value = body.thinkingLevel;
+  if (value === undefined || value === null) return null;
+  return requireChoice(value, THINKING_LEVELS, "thinkingLevel");
+}
+
+/**
  * The formats a provider will actually decode. The same list the composer
  * enforces, repeated here because the two ends are separately reachable: a
  * curl or an extension can post a prompt without going through the input bar.
@@ -420,6 +434,14 @@ function parseMcpDraft(value: unknown): McpServerDraft {
   };
 }
 
+/**
+ * One model entry from a provider write.
+ *
+ * Every field here is refused rather than coerced when it is malformed: the file
+ * this ends up in is read by pi at startup, and pi rejects a whole provider whose
+ * model list it cannot validate. A 400 in the form is recoverable; a
+ * `models.json` pi refuses to load is not.
+ */
 function parseModelEntries(value: unknown): ProviderModelEntry[] {
   if (!Array.isArray(value)) throw badRequest("models must be an array");
   return value.map((entry) => {
@@ -427,7 +449,58 @@ function parseModelEntries(value: unknown): ProviderModelEntry[] {
     const id = optionalString(item, "id") ?? "";
     if (id.length === 0) throw badRequest("模型 ID 不能为空。");
     const name = optionalString(item, "name") ?? "";
-    return name.length === 0 ? { id } : { id, name };
+    const parsed: ProviderModelEntry = name.length === 0 ? { id } : { id, name };
+    for (const field of ["contextWindow", "maxTokens"] as const) {
+      const raw = item[field];
+      if (raw === undefined) continue;
+      // A blank field arrives as absent, so anything that does arrive is meant
+      // as a number. `null` is also caught here: it is what `NaN` becomes on the
+      // wire, which is how a typo in the capacity box would otherwise travel.
+      if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) {
+        throw badRequest(field === "contextWindow" ? "上下文窗口必须是正数。" : "最大输出 token 数必须是正数。");
+      }
+      parsed[field] = raw;
+    }
+    if (item.input !== undefined) {
+      if (!Array.isArray(item.input)) throw badRequest("input must be an array");
+      const modalities: string[] = [];
+      for (const modality of item.input) {
+        if (modality !== "text" && modality !== "image") {
+          throw badRequest("输入类型只能是 text 或 image。");
+        }
+        if (!modalities.includes(modality)) modalities.push(modality);
+      }
+      // An empty list is how the editor spells "not declared", which is a state
+      // pi expresses by leaving the field out.
+      if (modalities.length > 0) parsed.input = modalities;
+    }
+    // `reasoning` is deliberately tri-state: a boolean is a claim — pi reads
+    // `false` as "this model does not think" — while an absent field says
+    // nothing and leaves pi's own catalog in charge. The editor sends `false`
+    // when its box is unchecked, which is the statement the user just made.
+    if (item.reasoning !== undefined) {
+      if (typeof item.reasoning !== "boolean") {
+        throw badRequest("reasoning 必须是 true 或 false。");
+      }
+      parsed.reasoning = item.reasoning;
+    }
+    if (item.thinkingLevelMap !== undefined) {
+      if (!isRecord(item.thinkingLevelMap)) throw badRequest("thinkingLevelMap 必须是一个对象。");
+      const map: Record<string, string | null> = {};
+      for (const [level, effort] of Object.entries(item.thinkingLevelMap)) {
+        // A key pi does not know is a level it would silently ignore, and a
+        // map that does nothing is worse than a 400 that does.
+        if (!(THINKING_LEVELS as readonly string[]).includes(level)) {
+          throw badRequest(`thinkingLevelMap 的键只能是 pi 的档位名：${THINKING_LEVELS.join("、")}。`);
+        }
+        if (effort !== null && (typeof effort !== "string" || effort.length === 0)) {
+          throw badRequest("thinkingLevelMap 的值必须是非空字符串或 null。");
+        }
+        map[level] = effort;
+      }
+      if (Object.keys(map).length > 0) parsed.thinkingLevelMap = map;
+    }
+    return parsed;
   });
 }
 
@@ -626,6 +699,28 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
       return {
         modelError: `无法切换到 ${model.provider}/${model.id}：${(err as Error).message}`,
       };
+    }
+  };
+
+  /**
+   * Apply the hero's thinking-level choice to a session that was just created.
+   *
+   * Same contract as `applyModel`, and it runs *after* it: pi clamps a level to
+   * what the just-switched model supports, so the order is the difference
+   * between the user's choice landing on that model and landing on the previous
+   * one.
+   */
+  const applyThinking = async (
+    handle: SessionHandle,
+    level: string | null,
+  ): Promise<{ thinkingError?: string }> => {
+    if (level === null) return {};
+    try {
+      await handle.client.setThinkingLevel(level as Parameters<RpcClient["setThinkingLevel"]>[0]);
+      registry.touch(handle.sessionPath);
+      return {};
+    } catch (err) {
+      return { thinkingError: `无法设置思考强度为 ${level}：${(err as Error).message}` };
     }
   };
 
@@ -1225,6 +1320,7 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
     }
     const project = await getProject(projectId);
     const model = optionalModel(payload);
+    const thinkingLevel = optionalThinkingLevel(payload);
 
     // A prewarmed process has already paid pi's cold start, so it can be
     // handed over without waiting. Claiming it also frees the slot, so warm
@@ -1238,6 +1334,7 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
         projectPath: project.path,
         prewarmed: true,
         ...(await applyModel(claimed, model)),
+        ...(await applyThinking(claimed, thinkingLevel)),
       });
       return;
     }
@@ -1249,6 +1346,7 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
       projectPath: project.path,
       prewarmed: false,
       ...(await applyModel(handle, model)),
+      ...(await applyThinking(handle, thinkingLevel)),
     });
   });
 
@@ -1389,6 +1487,32 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
       registry.touch(handle.sessionPath);
     } catch (err) {
       throw badRequest(`无法切换到 ${provider}/${id}：${(err as Error).message}`);
+    }
+
+    json(res, 200, await liveComposer(handle));
+  });
+
+  /**
+   * Switch the session's thinking level.
+   *
+   * pi persists this by appending a `thinking_level_change` entry, so it
+   * survives a reload and the terminal sees the same choice. A level the model
+   * does not support is *clamped* rather than rejected — that is pi's own
+   * `set_thinking_level` behaviour, and the answer below reports the level that
+   * actually took effect instead of the one that was asked for. A value outside
+   * pi's seven levels is still the caller's mistake and answers 400.
+   */
+  route("POST", "/api/sessions/:id/thinking", async ({ res, params, body }) => {
+    const sessionPath = allowedPath(params.id!);
+    const payload = asObject(body);
+    const level = requireChoice(payload.level, THINKING_LEVELS, "level");
+    const handle = await openSession(sessionPath);
+
+    try {
+      await handle.client.setThinkingLevel(level);
+      registry.touch(handle.sessionPath);
+    } catch (err) {
+      throw badRequest(`无法设置思考强度为 ${level}：${(err as Error).message}`);
     }
 
     json(res, 200, await liveComposer(handle));

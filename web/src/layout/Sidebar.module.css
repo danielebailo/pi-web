@@ -942,6 +942,37 @@
 }
 
 /*
+ * A touch device has no hover, so a cluster that only ever appears under the
+ * pointer is a cluster that never appears: renaming, hiding and deleting a
+ * session would simply be unreachable. The rows show their actions outright
+ * there, and the timestamp they were trading with goes away — there is no
+ * pointer to trade with, and the two do not both fit.
+ */
+@media (hover: none) {
+  .projectRow .rowActions,
+  .sessionRow .rowActions {
+    display: inline-flex;
+  }
+
+  .sessionRow .sessionTime {
+    display: none;
+  }
+}
+
+/*
+ * A finger is not a mouse. dsh's 34px and 32px rows are sized for a pointer
+ * that lands within a pixel, and a missed tap costs a navigation; both grow to
+ * the 44px minimum touch target there. `ChangedFilesCard` already does the same
+ * for the rows it owns.
+ */
+@media (pointer: coarse) {
+  .projectRow,
+  .sessionRow {
+    height: 44px;
+  }
+}
+
+/*
  * dsh's `.sessionOverflowButton`: a 28px row on the 8px corner, indented past
  * the session rows it belongs to (its leading padding is 28px + the group's
  * depth, written inline), and with no hover fill — it is a disclosure, not a

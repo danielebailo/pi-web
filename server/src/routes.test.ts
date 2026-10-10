@@ -665,6 +665,8 @@ describe("composer api", () => {
     delete process.env.STUB_MODEL;
     delete process.env.STUB_MODELS;
     delete process.env.STUB_CONTEXT_USAGE;
+    delete process.env.STUB_THINKING_LEVEL;
+    delete process.env.STUB_THINKING_LEVELS;
   });
 
   afterEach(async () => {
@@ -672,6 +674,8 @@ describe("composer api", () => {
     delete process.env.STUB_MODEL;
     delete process.env.STUB_MODELS;
     delete process.env.STUB_CONTEXT_USAGE;
+    delete process.env.STUB_THINKING_LEVEL;
+    delete process.env.STUB_THINKING_LEVELS;
     delete process.env.STUB_SESSION_FILE;
     await rm(agentDir, { recursive: true, force: true });
   });
@@ -719,7 +723,13 @@ describe("composer api", () => {
     const pending = join(sessionRoot, "--pending--", "pending.jsonl");
     const res = await api(`/api/sessions/${encodeURIComponent(pending)}/composer`);
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ live: false, model: null, models: null, context: null });
+    expect(res.body).toEqual({
+      live: false,
+      model: null,
+      models: null,
+      context: null,
+      thinkingLevel: null,
+    });
   });
 
   it("spawns on demand when asked for a live answer", async () => {
@@ -899,6 +909,64 @@ describe("composer api", () => {
     expect(res.body.error).toMatch(/无法切换到 cz\/nope/);
     // A typo is not a broken pi: the session is still usable.
     expect((await api("/api/health")).body.activeSessions).toBe(1);
+  });
+
+  it("switches the thinking level over rpc and answers with the new one", async () => {
+    const project = await createProject("composer-thinking");
+    const sessionPath = join(sessionRoot, "--api-thinking--", "thinking.jsonl");
+    process.env.STUB_SESSION_FILE = sessionPath;
+    process.env.STUB_MODEL = JSON.stringify({ provider: "cz", id: "deepseek-flash", contextWindow: 128000, reasoning: true });
+    process.env.STUB_MODELS = JSON.stringify([
+      { provider: "cz", id: "deepseek-flash", contextWindow: 128000, reasoning: true },
+    ]);
+
+    const created = await post("/api/sessions", { projectId: project.id });
+    const switched = await post(
+      `/api/sessions/${encodeURIComponent(created.body.sessionPath)}/thinking`,
+      { level: "high" },
+    );
+
+    expect(switched.status).toBe(200);
+    // The answer is the re-read composer, so it reports the level the process
+    // now holds rather than echoing the request.
+    expect(switched.body.thinkingLevel).toBe("high");
+    expect(switched.body.model.thinkingLevels).toContain("high");
+
+    const reread = await api(`/api/sessions/${encodeURIComponent(created.body.sessionPath)}/composer`);
+    expect(reread.body.thinkingLevel).toBe("high");
+  });
+
+  it("starts a new session on the thinking level the hero picked", async () => {
+    const project = await createProject("hero-thinking");
+    const sessionPath = join(sessionRoot, "--hero-thinking--", "thinking.jsonl");
+    process.env.STUB_SESSION_FILE = sessionPath;
+    process.env.STUB_THINKING_LEVEL = "minimal";
+    process.env.STUB_MODELS = JSON.stringify([
+      { provider: "cz", id: "deepseek-flash", contextWindow: 128000, reasoning: true },
+    ]);
+
+    const created = await post("/api/sessions", {
+      projectId: project.id,
+      thinkingLevel: "xhigh",
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.thinkingError).toBeUndefined();
+
+    const composer = await api(`/api/sessions/${encodeURIComponent(sessionPath)}/composer`);
+    expect(composer.body.thinkingLevel).toBe("xhigh");
+  });
+
+  it("rejects an unknown thinking level", async () => {
+    const project = await createProject("thinking-invalid");
+    process.env.STUB_SESSION_FILE = join(sessionRoot, "--thinking-invalid--", "invalid.jsonl");
+    const created = await post("/api/sessions", { projectId: project.id });
+
+    const res = await post(
+      `/api/sessions/${encodeURIComponent(created.body.sessionPath)}/thinking`,
+      { level: "impossible" },
+    );
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/level/);
   });
 
   it("requires a provider and an id", async () => {
@@ -1530,6 +1598,82 @@ describe("model providers api", () => {
     const again = await post("/api/models/providers", { id: "newco" });
     expect(again.status).toBe(400);
     expect(again.body.error).toMatch(/已有提供方使用了这个 ID/);
+  });
+
+  it("carries a model's capacity and input types through a save and back", async () => {
+    const created = await post("/api/models/providers", {
+      id: "newco",
+      models: [{ id: "big", contextWindow: 256000, maxTokens: 32000, input: ["text", "image"] }],
+    });
+    expect(created.status).toBe(201);
+
+    const res = await api("/api/models/providers");
+    expect(res.body.providers[0].models).toEqual([
+      { id: "big", contextWindow: 256000, maxTokens: 32000, input: ["text", "image"] },
+    ]);
+  });
+
+  it("carries a model's reasoning and thinking map through a save and back", async () => {
+    const created = await post("/api/models/providers", {
+      id: "newco",
+      models: [{ id: "m", reasoning: true, thinkingLevelMap: { xhigh: "xhigh", max: "max" } }],
+    });
+    expect(created.status).toBe(201);
+
+    const res = await api("/api/models/providers");
+    expect(res.body.providers[0].models).toEqual([
+      { id: "m", reasoning: true, thinkingLevelMap: { xhigh: "xhigh", max: "max" } },
+    ]);
+  });
+
+  it("refuses a reasoning flag or thinking map pi would not load, before it reaches the file", async () => {
+    const flag = await post("/api/models/providers", {
+      id: "newco",
+      models: [{ id: "m", reasoning: "yes" }],
+    });
+    expect(flag.status).toBe(400);
+    expect(flag.body.error).toMatch(/reasoning/);
+
+    // A key pi does not know is a level it would ignore, and a map that does
+    // nothing is worse than a refusal that says so.
+    const level = await post("/api/models/providers", {
+      id: "newco",
+      models: [{ id: "m", thinkingLevelMap: { extreme: "max" } }],
+    });
+    expect(level.status).toBe(400);
+    expect(level.body.error).toMatch(/档位名/);
+
+    const effort = await post("/api/models/providers", {
+      id: "newco",
+      models: [{ id: "m", thinkingLevelMap: { max: "" } }],
+    });
+    expect(effort.status).toBe(400);
+    expect(effort.body.error).toMatch(/非空字符串/);
+  });
+
+  it("refuses a capacity or input type pi would not load, before it reaches the file", async () => {
+    // `null` is what a `NaN` becomes over JSON — the shape an unreadable
+    // capacity box would send if the browser did not catch it first.
+    const zero = await post("/api/models/providers", {
+      id: "newco",
+      models: [{ id: "m", contextWindow: 0 }],
+    });
+    expect(zero.status).toBe(400);
+    expect(zero.body.error).toMatch(/上下文窗口/);
+
+    const nan = await post("/api/models/providers", {
+      id: "newco",
+      models: [{ id: "m", maxTokens: null }],
+    });
+    expect(nan.status).toBe(400);
+    expect(nan.body.error).toMatch(/最大输出/);
+
+    const modality = await post("/api/models/providers", {
+      id: "newco",
+      models: [{ id: "m", input: ["audio"] }],
+    });
+    expect(modality.status).toBe(400);
+    expect(modality.body.error).toMatch(/text 或 image/);
   });
 
   it("rejects a malformed id and a non-http base url", async () => {

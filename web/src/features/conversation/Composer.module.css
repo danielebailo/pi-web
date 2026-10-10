@@ -4,7 +4,11 @@
  * band between the last line of the transcript and the input. */
 .wrap {
   flex: 0 0 auto;
-  padding: 0 24px 8px;
+  /* The keyboard's inset stacks on the resting gap rather than replacing it:
+     the layout viewport does not shrink when a phone keyboard opens, so
+     without this the card sits behind the keys with nothing in the layout to
+     say so. The token is 0 at rest and on every desktop. */
+  padding: 0 24px calc(8px + var(--piws-keyboard-inset, 0px));
 }
 
 /* Mirrors dsh's InputBar card: 22px corners, a 12px gap between the input and
@@ -166,4 +170,47 @@
 .composer[data-dragging] {
   outline: 1.5px dashed var(--dsw-alias-state-business-primary);
   outline-offset: -2px;
+}
+
+/*
+ * A phone's card is one line tall, and so is the box the placeholder is painted
+ * into: a placeholder long enough to wrap has its second line clipped by the
+ * textarea, which reads as a broken render rather than as a hint. Truncating is
+ * the honest answer — the sentence was never going to be readable — and the
+ * copy is shortened on a narrow frame as well (`Composer.tsx` picks the key
+ * from the measured width).
+ */
+.input::placeholder {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Two things a phone cannot afford: the 24px gutters spend a tenth of the
+ * screen on nothing, and the toolbar's 12px rhythm plus every control in it
+ * leaves no room to breathe. The hint is dropped outright — on a touch device
+ * the send disc is the affordance, and the sentence about Enter is about a key
+ * the user does not have. */
+@media (max-width: 640px) {
+  .wrap {
+    padding-inline: 12px;
+  }
+
+  .toolbar {
+    gap: 8px;
+  }
+}
+
+/*
+ * The disc grows for a fingertip. 34px is dsh's mouse-sized control; the send
+ * button is the one control a phone user presses on every single message, and
+ * a near-miss there is the most expensive miss in the app. 40px is what fits
+ * inside the card's 22px corner without it becoming the card.
+ */
+@media (pointer: coarse) {
+  .send,
+  .stop {
+    width: 40px;
+    height: 40px;
+  }
 }

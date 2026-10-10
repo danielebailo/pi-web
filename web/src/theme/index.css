@@ -32,6 +32,26 @@
    * They are not repeated here. */
   --dsh-content-font-size: 15px;
 
+  /*
+   * Notch and home-indicator insets, published once so every consumer reads a
+   * token instead of repeating `env()` (and its fallbacks) in its own rule.
+   * `viewport-fit=cover` in `index.html` is what makes these non-zero; a
+   * desktop browser and the Electron shell both report 0, which is why nothing
+   * needs a platform branch to stay unchanged there.
+   */
+  --piws-safe-top: env(safe-area-inset-top, 0px);
+  --piws-safe-right: env(safe-area-inset-right, 0px);
+  --piws-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --piws-safe-left: env(safe-area-inset-left, 0px);
+
+  /*
+   * How much of the frame the soft keyboard is covering, in CSS pixels; 0 at
+   * rest and on every platform without a `visualViewport`. Written by
+   * `layout/use-keyboard-inset.ts` as an inline property on `documentElement`,
+   * which is why it is declared here with a default rather than only set.
+   */
+  --piws-keyboard-inset: 0px;
+
   /* Every dsh elevation token starts with `0 0 0 0.5px`, a hairline stroke
    * that reads as a border. Floating surfaces (menus, dialogs, toasts) should
    * separate from the page with shadow alone, so define one without the
@@ -44,6 +64,16 @@ html,
 body,
 #root {
   height: 100%;
+  /*
+   * `dvh` rather than `%`: on mobile Safari and Chrome the address bar
+   * collapses and returns as the user scrolls, and `100%` resolves against a
+   * viewport that changes underneath the layout — the shell would jump by the
+   * bar's height the first time the page moves. `dvh` is the dynamic viewport
+   * height, the one that already accounts for the bar being there.
+   *
+   * The `%` above stays as the fallback for engines without `dvh`.
+   */
+  height: 100dvh;
 }
 
 /*

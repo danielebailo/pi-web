@@ -34,6 +34,20 @@ export const GaugeIcon = (props: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
+/**
+ * One pane split into a left column and a main area: the shell's sidebar toggle.
+ *
+ * `PanelRightIcon` (`rightbar/rightbar-icons.tsx`) is the same box mirrored, and
+ * the two stay in separate modules on purpose — that one belongs to the panel it
+ * toggles, this one to the frame column the conversation header sits beside.
+ */
+export const PanelLeftIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg {...base(props)}>
+    <rect x={2} y={3} width={12} height={10} rx={1.5} />
+    <path d="M6.25 3v10" />
+  </svg>
+);
+
 export const FolderIcon = (props: SVGProps<SVGSVGElement>) => (
   <svg {...base(props)}>
     <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.2c.4 0 .78.16 1.06.44L7.8 4.5h4.7A1.5 1.5 0 0 1 14 6v5.5A1.5 1.5 0 0 1 12.5 13h-9A1.5 1.5 0 0 1 2 11.5z" />

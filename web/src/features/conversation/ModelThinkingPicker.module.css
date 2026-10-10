@@ -1,0 +1,290 @@
+/*
+ * The model + effort card.
+ *
+ * The trigger mirrors the composer's other text controls — it reads as part of
+ * the card until hovered or open — while the panel borrows the model menu's
+ * surface (the menu background and the float elevation) so it lands in the same
+ * visual family as the other popovers over the input.
+ */
+
+.anchor {
+  position: relative;
+  display: inline-flex;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 260px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12.5px;
+  line-height: 18px;
+}
+
+.trigger:hover,
+.trigger[aria-expanded="true"] {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+/*
+ * The effort in effect, above the track that sets it: plain muted words, no
+ * badge. It was a tinted square holding the level's short form (and before
+ * that, the provider's initial) — but a badge there competes with the model
+ * name for the card's one line of emphasis, and a square is a shape the eye
+ * reads as a thing to click. A line of secondary ink answers "thinking how
+ * hard" and then gets out of the way.
+ */
+.effortMark {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.triggerLabel {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The effort word rides along on the trigger so the collapsed control answers
+ * both halves of the question without opening the card. */
+.triggerEffort {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.trigger svg {
+  flex: none;
+}
+
+.panel {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  width: 272px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 10px;
+  border-radius: 20px;
+  background: var(--dsw-specific-menu);
+  box-shadow: var(--dsw-elevation-float);
+  /* The card takes focus so Escape works without a tab trip; the dialog ring
+   * would be a rectangle around a rounded surface. */
+  outline: none;
+}
+
+.head {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 32px;
+}
+
+.refresh {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  corner-shape: round;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.refresh:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+/* The model row is centred under the mark the way Codex centres its own: the
+ * card names one thing, so the mark and the name share an axis rather than
+ * sitting in list rows. */
+.modelRow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 100%;
+  padding: 4px 8px;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 22px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.modelRow:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.modelName {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.modelCaret {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  transition: transform 140ms ease;
+}
+
+.modelCaretOpen {
+  transform: rotate(90deg);
+}
+
+/* ---------------------------------------------------------------- slider -- */
+
+/*
+ * The effort track: a pill with the travelled part filled, the untravelled
+ * stops drawn as pips, and a white disc sitting on the current stop. The track
+ * is the hover wash rather than a static neutral: 6% black on the light theme
+ * is Codex's own near-white track, and the same token lands 8% white in dark
+ * mode, where a literal neutral would flare.
+ */
+.slider {
+  position: relative;
+  height: 32px;
+  border-radius: 999px;
+  corner-shape: round;
+  background: var(--dsw-alias-interactive-bg-hover);
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;
+  outline: none;
+}
+
+.slider:focus-visible {
+  box-shadow: 0 0 0 2px var(--dsw-alias-button-info-fill);
+}
+
+/* The stops are placed by `EffortSlider`, which owns the one geometry both the
+ * paint and the pointer read (`THUMB_SIZE` / `THUMB_TRAIL_PERCENT`). Keeping a
+ * second copy of it here is what let a drag stop short of both ends. */
+.sliderFill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 999px;
+  corner-shape: round;
+  background: var(--dsw-alias-button-info-fill);
+}
+
+.sliderDot {
+  position: absolute;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  border-radius: 999px;
+  corner-shape: round;
+  background: var(--dsw-alias-label-tertiary);
+  opacity: 0.5;
+}
+
+/* A stop the disc has already passed: the same pip, drawn against the fill
+ * instead of the track. White on blue is the only pair that stays a pip rather
+ * than dissolving into either surface. */
+.sliderDotDone {
+  background: var(--dsw-static-neutral-00);
+  opacity: 0.65;
+}
+
+.sliderThumb {
+  position: absolute;
+  top: 2px;
+  width: 28px;
+  height: 28px;
+  margin-left: -14px;
+  border-radius: 999px;
+  corner-shape: round;
+  background: var(--dsw-static-neutral-00);
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.24),
+    0 0 0 0.5px rgba(0, 0, 0, 0.05);
+}
+
+/* ------------------------------------------------------------ model list -- */
+
+.list {
+  display: flex;
+  flex-direction: column;
+  max-height: 264px;
+  overflow-y: auto;
+  padding: 2px 0;
+  outline: none;
+}
+
+.groupTitle {
+  padding: 6px 10px 2px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.groupTitle:not(:first-child) {
+  margin-top: 4px;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  flex: none;
+  padding: 6px 10px;
+  border-radius: 10px;
+  text-align: left;
+  font-size: 13.5px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.itemActive {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.itemName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.itemMeta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.itemMeta svg {
+  color: var(--dsw-alias-brand-primary);
+}
+
+.empty {
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}

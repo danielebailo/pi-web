@@ -25,6 +25,16 @@ const sessionId = process.env.STUB_SESSION_ID ?? "stub-session-id";
 let autoCompactionEnabled = true;
 
 /**
+ * Thinking state for the composer routes. Mutable so `set_thinking_level` can
+ * be observed through a later `get_state`, the same way a real session records
+ * it. The supported list defaults to pi's full seven-level scale.
+ */
+let thinkingLevel = process.env.STUB_THINKING_LEVEL ?? "medium";
+const stubThinkingLevels = process.env.STUB_THINKING_LEVELS
+  ? JSON.parse(process.env.STUB_THINKING_LEVELS)
+  : ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/**
  * Model state for the composer routes. `STUB_MODEL` is what the session is
  * currently on (null when the test does not care), `STUB_MODELS` is what
  * `get_available_models` reports, and `set_model` moves the former to the
@@ -97,7 +107,7 @@ process.stdin.on("data", (chunk) => {
           "get_state",
           {
             model: currentModel,
-            thinkingLevel: "medium",
+            thinkingLevel,
             isStreaming: false,
             isCompacting: false,
             steeringMode: "all",
@@ -176,6 +186,15 @@ process.stdin.on("data", (chunk) => {
         respond("set_model", found, message.id);
         break;
       }
+      case "get_available_thinking_levels":
+        respond("get_available_thinking_levels", { levels: stubThinkingLevels }, message.id);
+        break;
+      case "set_thinking_level":
+        // pi clamps to what the model supports; the stub only records, so a test
+        // can assert the round trip rather than a clamp the real pi owns.
+        thinkingLevel = message.level;
+        respond("set_thinking_level", undefined, message.id);
+        break;
       case "get_session_stats":
         respond(
           "get_session_stats",

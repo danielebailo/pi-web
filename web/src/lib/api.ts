@@ -276,7 +276,11 @@ export const api = {
     );
   },
 
-  createSession: (projectId: string, model?: { provider: string; id: string } | null) =>
+  createSession: (
+    projectId: string,
+    model?: { provider: string; id: string } | null,
+    thinkingLevel?: string | null,
+  ) =>
     request<{
       sessionPath: string;
       sessionId: string;
@@ -285,9 +289,15 @@ export const api = {
       /** Set when the hero's model choice could not be applied; the session
        * itself was created either way. */
       modelError?: string;
+      /** The same, for the hero's thinking-level choice. */
+      thinkingError?: string;
     }>("/api/sessions", {
       method: "POST",
-      body: JSON.stringify({ projectId, ...(model ? { model } : {}) }),
+      body: JSON.stringify({
+        projectId,
+        ...(model ? { model } : {}),
+        ...(thinkingLevel ? { thinkingLevel } : {}),
+      }),
     }),
 
   /** Best-effort: starts a pi process ahead of the next "new session". */
@@ -511,6 +521,17 @@ export const api = {
     request<ComposerState>(`/api/sessions/${sessionId(sessionPath)}/model`, {
       method: "POST",
       body: JSON.stringify({ provider, id }),
+    }),
+
+  /**
+   * Switch the session's thinking level. pi records it as a
+   * `thinking_level_change` and clamps an unsupported level, so the answer is
+   * the level that actually took effect rather than the one that was sent.
+   */
+  setSessionThinking: (sessionPath: string, level: string) =>
+    request<ComposerState>(`/api/sessions/${sessionId(sessionPath)}/thinking`, {
+      method: "POST",
+      body: JSON.stringify({ level }),
     }),
 
   prompt: (sessionPath: string, message: string, images: ImageBlock[] = []) =>

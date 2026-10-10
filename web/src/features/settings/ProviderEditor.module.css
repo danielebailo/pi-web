@@ -126,11 +126,115 @@ select.input {
   color: var(--dsw-alias-label-tertiary);
 }
 
+/*
+ * One model is a card rather than a bare row, because the disclosure below it
+ * belongs to this model and a divider between rows would only imply that.
+ */
+.modelEntry {
+  padding: 8px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-base);
+}
+
 .modelRow {
   display: grid;
-  grid-template-columns: 1fr 1fr 36px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px 32px;
   gap: 8px;
   align-items: center;
+}
+
+/*
+ * The card keeps the page's own fill so it reads as a card on the tinted panel,
+ * which leaves its fields needing the panel fill back; the rule is written one
+ * class deeper than `.advanced .input` below, which would otherwise win.
+ */
+.advanced .modelEntry .input {
+  height: 32px;
+  background: var(--dsw-alias-bg-module-platform);
+}
+
+/*
+ * The disclosure caret keeps the neutral hover the fields have; only the delete
+ * button beside it turns red, which is what tells the two apart at a glance.
+ */
+.iconToggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  color: var(--dsw-alias-label-tertiary);
+  background: none;
+  cursor: pointer;
+}
+
+.iconToggle:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.modelAdvanced {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 8px 4px 2px;
+}
+
+.modelField {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 4px;
+}
+
+/* Spans both capacity columns: the input types are a set, not a third value. */
+.modelInputTypes {
+  grid-column: 1 / -1;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.modelInputTypes legend {
+  padding: 0;
+  margin-bottom: 4px;
+}
+
+.modelFieldLabel {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.modelInputChoices {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  min-height: 28px;
+}
+
+.modelInputChoice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+}
+
+.modelInputChoice input {
+  cursor: pointer;
+}
+
+.modelInputChoice input:disabled {
+  cursor: default;
 }
 
 /*

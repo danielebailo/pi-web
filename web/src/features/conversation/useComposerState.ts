@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { actions, appStore, sessionEvents } from "../../lib/app-state.ts";
 import { api } from "../../lib/api.ts";
 import type { ComposerState } from "../../lib/types.ts";
@@ -33,6 +33,12 @@ export interface ComposerApi {
   ensureLive(): Promise<void>;
   /** Switch the session's model. Resolves once the server confirmed it. */
   selectModel(provider: string, id: string): Promise<void>;
+  /**
+   * Switch the session's thinking level. Resolves once the server confirmed it,
+   * and the state it resolves to is the level pi actually applied — an
+   * unsupported one is clamped rather than refused.
+   */
+  selectThinking(level: string): Promise<void>;
 }
 
 /**
@@ -63,6 +69,15 @@ export function useComposerState({ sessionPath, projectId }: ComposerSource): Co
     appStore.subscribe,
     () => appStore.get().newSessionModel,
     () => appStore.get().newSessionModel,
+  );
+  /**
+   * The hero's own thinking-level choice, for the same reason and read the same
+   * way as `newSessionModel`.
+   */
+  const newSessionThinkingLevel = useSyncExternalStore(
+    appStore.subscribe,
+    () => appStore.get().newSessionThinkingLevel,
+    () => appStore.get().newSessionThinkingLevel,
   );
   /** What the current state belongs to: a session path, or `project:<id>`. */
   const sourceKey = sessionPath ?? (projectId === null ? null : `project:${projectId}`);
@@ -192,5 +207,45 @@ export function useComposerState({ sessionPath, projectId }: ComposerSource): Co
       ? { ...state, model: newSessionModel }
       : state;
 
-  return { state: overridden, modelsLoading, ensureLive, selectModel };
+  const selectThinking = useCallback(
+    async (level: string): Promise<void> => {
+      const path = sessionPath;
+      if (path === null) {
+        // Nothing to switch yet: remember the choice, and `createSession`
+        // applies it when the first message creates the session.
+        actions.setNewSessionThinkingLevel(level);
+        return;
+      }
+      try {
+        apply(path, await api.setSessionThinking(path, level));
+      } catch (err) {
+        actions.setNotice((err as Error).message);
+      }
+    },
+    [sessionPath, apply],
+  );
+
+  /**
+   * The hero's level, when it has one: the same override rule as the model, but
+   * keyed on the level string rather than a model identity.
+   */
+  const shown =
+    overridden !== null && sessionPath === null && newSessionThinkingLevel !== null
+      ? { ...overridden, thinkingLevel: newSessionThinkingLevel }
+      : overridden;
+
+  /*
+   * Memoised on the three things it is built from, so a render of the caller
+   * that changed none of them hands back the same object. Without this, every
+   * commit anywhere in the composer produced a fresh `state`, which re-rendered
+   * the model card — and a re-rendered `EffortSlider` is a re-created one: its
+   * held drag preview is component state, so the disc snapped back for the
+   * length of the round trip.
+   */
+  const value = useMemo(
+    () => ({ state: shown, modelsLoading, ensureLive, selectModel, selectThinking }),
+    [shown, modelsLoading, ensureLive, selectModel, selectThinking],
+  );
+
+  return value;
 }

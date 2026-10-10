@@ -20,8 +20,8 @@
  *
  * Everything here preserves fields it does not understand. The provider schema
  * is large — `compat`, `modelOverrides`, `thinkingLevelMap`, per-model `cost`,
- * `contextWindow` — and a save that rebuilt a provider from only the fields
- * this UI renders would silently delete the rest of the user's configuration.
+ * `inputLimits` — and a save that rebuilt a provider from only the fields this
+ * UI renders would silently delete the rest of the user's configuration.
  */
 
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
@@ -130,6 +130,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * A model's `thinkingLevelMap`, narrowed to the shape the composer reads.
+ *
+ * pi validates this file itself, so a malformed value here is one the runtime
+ * would reject too; dropping it only costs the `xhigh`/`max` distinction, which
+ * is the safe direction (fewer offered levels, never an invented one).
+ */
+function isThinkingLevelMap(value: unknown): value is Record<string, string | null> {
+  if (!isRecord(value)) return false;
+  return Object.values(value).every((entry) => entry === null || typeof entry === "string");
+}
+
 async function readJsonFile(path: string): Promise<Record<string, unknown>> {
   let raw: string;
   try {
@@ -151,10 +163,73 @@ async function readJsonFile(path: string): Promise<Record<string, unknown>> {
   return parsed;
 }
 
-/** A model entry inside a provider. pi only requires `id`. */
+/**
+ * A model entry inside a provider. pi only requires `id`.
+ *
+ * The three optional fields are the ones the settings page edits directly. They
+ * all follow the same convention: absent means "say nothing", so pi falls back
+ * to the provider's own catalog entry for this model (or to its built-in
+ * defaults). That is why the editor can leave a field blank without inventing a
+ * value — a wrong context window is worse than an unstated one.
+ */
 export interface ProviderModelEntry {
   id: string;
   name?: string;
+  /** Tokens the model can hold in one conversation. */
+  contextWindow?: number;
+  /** Tokens the model may generate in one reply. */
+  maxTokens?: number;
+  /** Modalities the model accepts, from pi's `input` union. */
+  input?: string[];
+  /**
+   * True when the model can be asked to think before it answers.
+   *
+   * This is the one capability no catalog endpoint reports in a standard field:
+   * OpenAI and Anthropic answer with an id and nothing else, so discovery can
+   * only ever guess it from whatever a gateway chose to add (see
+   * `catalogReasons`). The editor carries a checkbox for it precisely because a
+   * guess is not always available and is not always right.
+   *
+   * Absent means "say nothing": pi falls back to its own catalog entry for this
+   * model, and a model it does not know gets no thinking levels at all.
+   */
+  reasoning?: boolean;
+  /**
+   * Which of pi's thinking levels this model maps to; `null` disables one.
+   *
+   * Only `xhigh` and `max` have to be named here — every level below them exists
+   * as soon as `reasoning` is true — which is why the editor offers exactly
+   * those two as checkboxes and leaves the rest of the map untouched. A value is
+   * the effort name the provider expects, which for most endpoints is the level
+   * name itself.
+   */
+  thinkingLevelMap?: Record<string, string | null>;
+}
+
+/** pi's `input` field admits exactly these two modalities. */
+const INPUT_MODALITIES: readonly string[] = ["text", "image"];
+
+/** A token count pi would accept: a finite, positive number. */
+function isTokenCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+/**
+ * Read an `input` array, or nothing when it declares no usable modality.
+ *
+ * pi's schema for this field is a list of `text`/`image` literals, so anything
+ * else in the file is a value pi itself would refuse; dropping it keeps the
+ * rest of the entry readable instead of failing the whole page.
+ */
+function readInputModalities(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out: string[] = [];
+  for (const item of value) {
+    if (typeof item === "string" && INPUT_MODALITIES.includes(item) && !out.includes(item)) {
+      out.push(item);
+    }
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 /** What the settings page renders for one provider. Never carries a secret. */
@@ -182,9 +257,17 @@ function readModels(provider: Record<string, unknown>): ProviderModelEntry[] {
   const out: ProviderModelEntry[] = [];
   for (const entry of list) {
     if (!isRecord(entry) || typeof entry.id !== "string") continue;
+    const input = readInputModalities(entry.input);
     out.push({
       id: entry.id,
       ...(typeof entry.name === "string" ? { name: entry.name } : {}),
+      ...(isTokenCount(entry.contextWindow) ? { contextWindow: entry.contextWindow } : {}),
+      ...(isTokenCount(entry.maxTokens) ? { maxTokens: entry.maxTokens } : {}),
+      ...(input === undefined ? {} : { input }),
+      ...(typeof entry.reasoning === "boolean" ? { reasoning: entry.reasoning } : {}),
+      ...(isThinkingLevelMap(entry.thinkingLevelMap)
+        ? { thinkingLevelMap: entry.thinkingLevelMap }
+        : {}),
     });
   }
   return out;
@@ -227,16 +310,23 @@ export async function readProviders(): Promise<ModelProviderView[]> {
 /**
  * One model definition, as far as the composer needs it.
  *
- * The settings page renders only `id` and `name`, but the input bar also wants
- * the model's display name and its `contextWindow` — so this keeps the two
- * fields the editor deliberately drops. Everything else in the entry
- * (`cost`, `maxTokens`, `compat`, …) is still ignored here.
+ * The settings page edits `id`, `name`, `contextWindow`, `maxTokens` and
+ * `input`; the input bar also wants the display name and the context window, so
+ * this keeps those fields in the shape a session's model picker asks for.
+ * Everything else in the entry (`cost`, `compat`, …) is still ignored here.
  */
 export interface CatalogModel {
   id: string;
   name?: string;
   contextWindow?: number;
   reasoning?: boolean;
+  /**
+   * Which of pi's thinking levels this model maps to; `null` disables one.
+   * Only `xhigh`/`max` need it — every lower level is always available to a
+   * reasoning model — but the whole map is kept so the composer can answer the
+   * same list a running pi would (`get_available_thinking_levels`).
+   */
+  thinkingLevelMap?: Record<string, string | null>;
 }
 
 /** `models.json`'s model list, keyed by provider id then model id. */
@@ -266,6 +356,9 @@ export async function readModelCatalog(): Promise<ModelCatalog> {
         ...(typeof raw.name === "string" ? { name: raw.name } : {}),
         ...(typeof raw.contextWindow === "number" ? { contextWindow: raw.contextWindow } : {}),
         ...(typeof raw.reasoning === "boolean" ? { reasoning: raw.reasoning } : {}),
+        ...(isThinkingLevelMap(raw.thinkingLevelMap)
+          ? { thinkingLevelMap: raw.thinkingLevelMap }
+          : {}),
       });
     }
     catalog.set(providerId, entries);
@@ -383,9 +476,152 @@ function parseModelList(body: unknown): ProviderModelEntry[] {
         : typeof entry.name === "string" && entry.name.length > 0
           ? entry.name
           : undefined;
-    out.push(label === undefined ? { id: entry.id } : { id: entry.id, name: label });
+    const parsed: ProviderModelEntry = label === undefined ? { id: entry.id } : { id: entry.id, name: label };
+    // Capabilities ride along when the endpoint volunteers them: an id and a
+    // label are all OpenAI and Anthropic ever send, but a gateway fronting many
+    // models usually knows more, and dropping it would mean the user retypes a
+    // context window the provider just handed us.
+    const contextWindow = firstCount(entry, CATALOG_CONTEXT_PATHS);
+    if (contextWindow !== undefined) parsed.contextWindow = contextWindow;
+    const maxTokens = firstCount(entry, CATALOG_MAX_TOKENS_PATHS);
+    if (maxTokens !== undefined) parsed.maxTokens = maxTokens;
+    const modalities = catalogModalities(entry);
+    if (modalities !== undefined) parsed.input = modalities;
+    // `reasoning` is the exception to "copy what is there": see catalogReasons.
+    if (catalogReasons(entry)) parsed.reasoning = true;
+    out.push(parsed);
   }
   return out;
+}
+
+/**
+ * Where a catalog entry might keep the size of its context window.
+ *
+ * Spellings differ by vendor rather than by protocol: OpenRouter answers
+ * `context_length` (and repeats it under `top_provider`), LiteLLM
+ * `max_input_tokens`, vLLM `max_model_len`. None of them is authoritative for
+ * `models.json` — the editor can correct whatever this picks up — but taking the
+ * first one that is present beats making the user look it up.
+ */
+const CATALOG_CONTEXT_PATHS: readonly string[] = [
+  "contextWindow",
+  "context_window",
+  "context_length",
+  "max_context_length",
+  "max_input_tokens",
+  "max_model_len",
+  "top_provider.context_length",
+];
+
+/** The same idea for the reply cap, which is offered even less often. */
+const CATALOG_MAX_TOKENS_PATHS: readonly string[] = [
+  "maxTokens",
+  "max_tokens",
+  "max_output_tokens",
+  "max_completion_tokens",
+  "top_provider.max_completion_tokens",
+];
+
+/** Read a dotted path out of nested records; anything else reads as absent. */
+function readPath(entry: Record<string, unknown>, path: string): unknown {
+  let value: unknown = entry;
+  for (const step of path.split(".")) {
+    if (!isRecord(value)) return undefined;
+    value = value[step];
+  }
+  return value;
+}
+
+/**
+ * The first positive count among `paths`, or nothing.
+ *
+ * A count that arrives as a string is accepted (`/^\d+$/` only, so `"128k"` is
+ * not guessed at) because some gateways serialize their numbers that way. A
+ * zero or a negative is not a claim about a model, it is a placeholder, and a
+ * value pi would reject stops the whole provider from loading.
+ */
+function firstCount(entry: Record<string, unknown>, paths: readonly string[]): number | undefined {
+  for (const path of paths) {
+    const value = readPath(entry, path);
+    if (typeof value === "number" && Number.isInteger(value) && value > 0) return value;
+    if (typeof value === "string" && /^\d+$/.test(value)) {
+      const parsed = Number(value);
+      if (parsed > 0) return parsed;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The modalities an entry declares, in pi's vocabulary.
+ *
+ * `input` is pi's own field name, `input_modalities` and
+ * `architecture.input_modalities` are OpenRouter's, and a `capabilities` map or
+ * list carrying `vision` means the same thing. Only `text` and `image` survive:
+ * they are the whole of pi's union, so an `audio` this endpoint accepts would be
+ * a value pi refuses.
+ */
+function catalogModalities(entry: Record<string, unknown>): string[] | undefined {
+  const out: string[] = [];
+  for (const path of ["input", "input_modalities", "architecture.input_modalities"]) {
+    const value = readPath(entry, path);
+    if (!Array.isArray(value)) continue;
+    for (const item of value) {
+      if (typeof item === "string" && INPUT_MODALITIES.includes(item) && !out.includes(item)) {
+        out.push(item);
+      }
+    }
+  }
+  if (catalogCapabilityNames(entry).includes("vision") && !out.includes("image")) out.push("image");
+  return out.length > 0 ? out : undefined;
+}
+
+/**
+ * True when an entry *affirms* that the model can think.
+ *
+ * Only an affirmation is copied, never a denial. A gateway's `reasoning: false`
+ * can mean "this model returns no reasoning text" as easily as "this model
+ * cannot reason", and pi would take the first as the second and hide the effort
+ * ladder on a model that has one. Saying nothing leaves pi's own catalog in
+ * charge, which is the safe direction: fewer levels offered, never an invented
+ * one.
+ */
+function catalogReasons(entry: Record<string, unknown>): boolean {
+  for (const path of [
+    "reasoning",
+    "capabilities.reasoning",
+    "model_info.supports_reasoning",
+    "model_info.supports_reasoning_effort",
+  ]) {
+    if (readPath(entry, path) === true) return true;
+  }
+  if (catalogCapabilityNames(entry).includes("reasoning")) return true;
+  // OpenRouter lists `reasoning` and `reasoning_effort` among the parameters a
+  // model accepts, which is the same statement in a different shape.
+  const parameters = readPath(entry, "supported_parameters");
+  return (
+    Array.isArray(parameters) &&
+    parameters.some((name) => typeof name === "string" && name.startsWith("reasoning"))
+  );
+}
+
+/**
+ * Capability names from whichever shape a `capabilities` field arrived in.
+ *
+ * Both are seen: a list of names (`["reasoning", "vision"]`) and a map of
+ * booleans (`{ reasoning: true }`).
+ */
+function catalogCapabilityNames(entry: Record<string, unknown>): string[] {
+  const capabilities = readPath(entry, "capabilities");
+  if (Array.isArray(capabilities)) {
+    return capabilities.filter((name): name is string => typeof name === "string");
+  }
+  if (isRecord(capabilities)) {
+    return Object.entries(capabilities)
+      .filter(([, on]) => on === true)
+      .map(([name]) => name);
+  }
+  return [];
 }
 
 export interface FetchModelsInput {
@@ -549,11 +785,20 @@ async function writeJsonAtomic(path: string, data: unknown): Promise<void> {
  * Merge the model list the editor sent into the one already stored, matching by
  * id.
  *
- * The editor renders only `id` and `name`, but a model entry carries far more —
- * `contextWindow`, `maxTokens`, `cost`, `reasoning`, `input`, `thinkingLevelMap`,
- * `compat`. Rebuilding the array from the two rendered fields would drop all of
- * it: a provider whose model declared a 1M context window would come back with
- * none, and pi would fall back to a default that is wrong for that endpoint.
+ * The editor renders `id`, `name`, the two capacities, the modality list,
+ * `reasoning` and `thinkingLevelMap`, but a model entry carries far more —
+ * `cost`, `compat`, `inputLimits`. Rebuilding the array from the rendered
+ * fields would drop all of it: a provider whose model declared a per-token
+ * price would come back without one, and pi would fall back to defaults that
+ * are wrong for that endpoint.
+ *
+ * The rendered fields are set from what the editor sent, where an absent value
+ * means "remove it" rather than "leave it" — the editor holds the entire entry's
+ * worth of these fields in its state, so a cleared field is a deliberate one,
+ * and keeping the old number would make clearing impossible. `reasoning` and
+ * `thinkingLevelMap` are the exception, because pi may have been reading them
+ * from a hand-written entry all along: see the note at the end of this
+ * function.
  *
  * Entries the editor no longer lists are removed, so deleting a model from the
  * dialog still deletes it.
@@ -575,6 +820,31 @@ function mergeModels(
     // field — storing `name: ""` would leave a blank label in its model picker.
     if (model.name === undefined || model.name.length === 0) delete merged.name;
     else merged.name = model.name;
+    // Same rule for the numeric capacities: blank is inheritance, not zero. A
+    // stored 0 would be a claim about the model rather than the absence of one,
+    // and a count pi's schema refuses is dropped rather than written to a file
+    // pi would then refuse to load.
+    for (const field of ["contextWindow", "maxTokens"] as const) {
+      const value = model[field];
+      if (isTokenCount(value)) merged[field] = value;
+      else delete merged[field];
+    }
+    // And for `input`: an empty list is not "accepts nothing", it is "ask the
+    // provider's own catalog".
+    const input = readInputModalities(model.input);
+    if (input === undefined) delete merged.input;
+    else merged.input = input;
+    // The thinking pair is the one place a missing field is not a clearing.
+    // These two can be hand-written into `models.json` — pi's own catalog may
+    // not describe the model at all — so a caller that stays silent about them
+    // keeps whatever pi has been reading. The editor is never silent: it sends
+    // `false` (this model does not think, which is a statement of its own) or
+    // an empty map (no extra levels) when the user asks for one.
+    if (typeof model.reasoning === "boolean") merged.reasoning = model.reasoning;
+    if (model.thinkingLevelMap !== undefined) {
+      if (Object.keys(model.thinkingLevelMap).length === 0) delete merged.thinkingLevelMap;
+      else merged.thinkingLevelMap = model.thinkingLevelMap;
+    }
     return merged;
   });
 }

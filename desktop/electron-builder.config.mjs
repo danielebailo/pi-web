@@ -11,6 +11,7 @@
  * 只在 Electron 自己的进程里有。摊平成真实文件树，两边行为就一致了。
  */
 import { existsSync, readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -76,6 +77,23 @@ export default {
   // 产物里没有原生模块，也没有需要重新编译的依赖，跳过 electron-rebuild。
   npmRebuild: false,
   asar: false,
+
+  /**
+   * 打包版也要 ad-hoc 签名。
+   *
+   * Electron 42 起 macOS 通知走 `UNNotification`，它要求应用有真正的签名才
+   * 肯投递，而链接器签名的二进制会被静默拒绝——下面是 `identity: null`，
+   * 意思是「不去找证书」，不是「不要签名」，所以这里自己补上。开发模式那份
+   * Electron 由 `scripts/sign-dev-electron.mjs` 做同一件事。
+   */
+  afterPack: async (context) => {
+    if (process.platform !== "darwin") return;
+    const appPath = join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);
+    const signed = spawnSync("codesign", ["--force", "--deep", "--sign", "-", appPath], {
+      stdio: "inherit",
+    });
+    if (signed.status !== 0) throw new Error(`ad-hoc 签名失败：${appPath}`);
+  },
   // 自带运行时：安装包内的 resources/runtime/node/bin/node 就是 agent 子进程用的 Node。
   extraResources: [{ from: runtimeDir, to: "runtime" }],
   files: ["**/*", "!**/*.map", "!**/.DS_Store", "!package-lock.json"],
@@ -88,7 +106,8 @@ export default {
     icon: iconPath,
     darkModeSupport: true,
     artifactName: MAC_ARTIFACT,
-    // 没有签名证书：显式关掉，免得 electron-builder 去找钥匙串然后失败。
+    // 没有签名证书，不发证书，但也不留一份未签名的包——`afterPack` 会做
+    // ad-hoc 签名，macOS 的通知要有它才投递。
     identity: null,
     notarize: false,
   },

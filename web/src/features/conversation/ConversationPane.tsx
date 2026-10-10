@@ -1,10 +1,11 @@
 import { useCallback } from "react";
-import { AlertIcon, RefreshIcon } from "../../components/icons.tsx";
+import { AlertIcon, PanelLeftIcon, RefreshIcon } from "../../components/icons.tsx";
 import { Glyph } from "../../components/dsh-icons.tsx";
 import { api } from "../../lib/api.ts";
 import { actions, appStore, isDraftSession, useT } from "../../lib/app-state.ts";
 import { useStore } from "../../lib/store.ts";
 import { rightbarActions, rightbarStore } from "../rightbar/rightbar-state.ts";
+import { layoutActions, layoutStore, sidebarGeometry } from "../../layout/layout-state.ts";
 import { publishTurnChanges, type TurnChanges } from "../rightbar/turn-changes-store.ts";
 import { PanelRightIcon } from "../rightbar/rightbar-icons.tsx";
 import { shortcutTitle } from "../rightbar/shortcuts.ts";
@@ -36,6 +37,11 @@ export function ConversationPane() {
   // control, and a second one would be a second way to say the same thing.
   const rightbarState = useStore(rightbarStore);
   const rightbarOpen = rightbarState.surfaces[selected ?? ""]?.open === true;
+  // The header's sidebar toggle states whether the column is on screen, which
+  // is two different questions in the two presentations: on a narrow frame the
+  // column takes no track at all and "shown" means the drawer is out.
+  const sidebar = sidebarGeometry(useStore(layoutStore));
+  const sidebarShown = sidebar.overlay || sidebar.width > 0;
   // The model picker and context ring describe the session the text goes into.
   // They read from the session file until a pi process is needed, which is only
   // when the user actually opens one of them — see `useComposerState`.
@@ -166,6 +172,20 @@ export function ConversationPane() {
             header, so this empty row keeps the center column's window-drag band
             over the hero. */}
         <header className={styles.headerBlank} data-window-drag aria-hidden />
+        {/* The hero has no header of its own, so the toggle takes the same
+            top-left seat as a floating control. Absolute rather than a row of
+            its own: the hero centres itself in what is left of the column, and
+            a row would push that centre off by its own height. */}
+        <button
+          type="button"
+          className={styles.heroToggle}
+          title={sidebarShown ? t("pane.sidebarHide") : t("pane.sidebarShow")}
+          aria-label={sidebarShown ? t("pane.sidebarHide") : t("pane.sidebarShow")}
+          aria-expanded={sidebarShown}
+          onClick={() => layoutActions.toggleSidebar()}
+        >
+          <PanelLeftIcon width={14} height={14} />
+        </button>
         <NewSessionHero />
         {questionCard}
       </div>
@@ -181,6 +201,16 @@ export function ConversationPane() {
   return (
     <div className={styles.pane}>
       <header className={styles.header} data-window-drag>
+        <button
+          type="button"
+          className={styles.headerIconAction}
+          title={sidebarShown ? t("pane.sidebarHide") : t("pane.sidebarShow")}
+          aria-label={sidebarShown ? t("pane.sidebarHide") : t("pane.sidebarShow")}
+          aria-expanded={sidebarShown}
+          onClick={() => layoutActions.toggleSidebar()}
+        >
+          <PanelLeftIcon width={14} height={14} />
+        </button>
         <span className={styles.headerTitle}>{project?.title ?? "pi-web-simple"}</span>
         <span className={styles.headerSub}>{headerSub}</span>
         {draft ? <span className={styles.spinner} aria-hidden /> : null}
@@ -261,9 +291,12 @@ export function ConversationPane() {
                   model: composer.state?.model ?? null,
                   models: composer.state?.models ?? null,
                   context: composer.state?.context ?? null,
+                  thinkingLevel: composer.state?.thinkingLevel ?? null,
                   loading: composer.modelsLoading,
+                  live: composer.state?.live ?? false,
                   onRequestLive: () => void composer.ensureLive(),
                   onSelectModel: (provider, id) => void composer.selectModel(provider, id),
+                  onSelectThinking: (level) => void composer.selectThinking(level),
                 }
           }
           onSend={sendMessage}

@@ -27,10 +27,14 @@ import {
   app,
   BrowserWindow,
   dialog,
+  ipcMain,
   Menu,
+  Notification,
   shell,
   type MenuItemConstructorOptions,
+  type WebContents,
 } from "electron";
+import { badgeOverlay } from "./badge-overlay.cjs";
 
 /** Same default as the published CLI, so docs and screenshots stay true. */
 const DEFAULT_PORT = 5319;
@@ -376,6 +380,127 @@ function isExternal(url: string, appUrl: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// notifications
+
+/**
+ * The channels the preload bridge speaks. The names are written on both sides
+ * of the isolated world, so they live here and in exactly one other file
+ * (`desktop/src/preload.cts`).
+ */
+const NOTIFY_CHANNEL = "piweb:notify";
+const BADGE_CHANNEL = "piweb:badge";
+const NOTIFICATION_CLICK_CHANNEL = "piweb:notification-click";
+
+/** What the page asks the shell to show; the copy is already translated. */
+interface ShellNotification {
+  title: string;
+  body: string;
+  /** The session path, doubling as the notice's identity (the web path's `tag`). */
+  tag: string;
+}
+
+/**
+ * Mirror the count of finished-but-unopened sessions onto the OS: the Dock on
+ * macOS, the launcher on Linux, and — because Windows has no numeric badge —
+ * an overlay bitmap on the taskbar icon.
+ */
+function applyBadge(count: number): void {
+  const safe = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+  currentBadge = safe;
+  if (process.platform === "win32") {
+    const target = mainWindow();
+    if (target === null) return;
+    target.setOverlayIcon(
+      safe === 0 ? null : badgeOverlay(safe),
+      safe === 0 ? "" : `${safe} sessions finished`,
+    );
+    return;
+  }
+  // macOS Dock and the Linux Unity launcher both read this one, and it clears
+  // the badge at zero by itself.
+  app.setBadgeCount(safe);
+}
+
+/**
+ * Notices still on screen, keyed by session path. Electron drops a
+ * `Notification` that nothing references, and the map also gives a session's
+ * newer notice something to replace instead of stacking a duplicate.
+ */
+const notices = new Map<string, Notification>();
+
+/**
+ * The count the page last asked for. A taskbar overlay dies with its window, so
+ * a rebuilt one has to be told again — macOS and Linux keep the badge on the
+ * app and need nothing here.
+ */
+let currentBadge = 0;
+
+function showShellNotification(notice: ShellNotification, sender: WebContents): void {
+  notices.get(notice.tag)?.close();
+
+  const notification = new Notification({ title: notice.title, body: notice.body });
+  notices.set(notice.tag, notification);
+  notification.on("click", () => revealWindow(sender, notice.tag));
+  notification.on("failed", (_event, error: string) => {
+    // macOS 上 `UNNotification` 拒绝投递时唯一的信号：`isSupported()` 依旧
+    // 为 true，没有监听器就完全看不出发生了什么。链接器签名的 Electron
+    // （开发模式没重签时）就落在这里，所以留一行到 stderr。
+    recordLine(`[desktop] notification failed: ${error}`);
+    if (notices.get(notice.tag) === notification) notices.delete(notice.tag);
+  });
+  notification.on("close", () => {
+    if (notices.get(notice.tag) === notification) notices.delete(notice.tag);
+  });
+  notification.show();
+}
+
+/**
+ * Bring the window forward and tell the page which session the notice named.
+ *
+ * The click lands in the main process, but the session list lives in the
+ * renderer, so the answer travels back over `NOTIFICATION_CLICK_CHANNEL`. A
+ * window that had to be recreated is still loading its first page, and a send
+ * before `did-finish-load` would be dropped — hence the wait.
+ */
+function revealWindow(sender: WebContents, sessionPath: string): void {
+  const target = mainWindow();
+  if (target !== null) {
+    if (target.isMinimized()) target.restore();
+    if (!target.isVisible()) target.show();
+    target.focus();
+  }
+  const contents = target?.webContents ?? sender;
+  if (contents.isDestroyed()) return;
+  const deliver = (): void => contents.send(NOTIFICATION_CLICK_CHANNEL, sessionPath);
+  if (contents.isLoading()) contents.once("did-finish-load", deliver);
+  else deliver();
+}
+
+/** Narrow an IPC payload before it reaches `new Notification`. */
+function readNotification(payload: unknown): ShellNotification | null {
+  if (typeof payload !== "object" || payload === null) return null;
+  const { title, body, tag } = payload as Partial<ShellNotification>;
+  if (typeof title !== "string" || typeof body !== "string" || typeof tag !== "string") {
+    return null;
+  }
+  return { title, body, tag };
+}
+
+/**
+ * Wire the renderer-facing channels. The page can only reach them through the
+ * preload bridge, which is what keeps `ipcRenderer` out of the UI.
+ */
+function registerDesktopBridge(): void {
+  ipcMain.on(NOTIFY_CHANNEL, (event, payload: unknown) => {
+    const notice = readNotification(payload);
+    if (notice !== null) showShellNotification(notice, event.sender);
+  });
+  ipcMain.on(BADGE_CHANNEL, (_event, count: unknown) => {
+    if (typeof count === "number") applyBadge(count);
+  });
+}
+
+// ---------------------------------------------------------------------------
 // menu
 
 function buildMenu(handle: ServerHandle): Menu {
@@ -474,6 +599,29 @@ let starting: ChildProcess | null = null;
 let window: BrowserWindow | null = null;
 let shutdown: Promise<void> | null = null;
 
+/** Track the window and forget it when the user closes it (macOS stays alive). */
+function adoptWindow(created: BrowserWindow): BrowserWindow {
+  window = created;
+  created.on("closed", () => {
+    if (window === created) window = null;
+  });
+  // The Windows overlay is a property of the window, so a new one starts bare.
+  if (process.platform === "win32" && currentBadge > 0) applyBadge(currentBadge);
+  return created;
+}
+
+/**
+ * The app's one window, recreated if the user closed it. macOS keeps the app
+ * (and its server) running after the last window closes, so "closed" is not
+ * "quit" there, and both the Dock icon and a notification click have to be able
+ * to bring the UI back.
+ */
+function mainWindow(): BrowserWindow | null {
+  if (window !== null && window.isDestroyed()) window = null;
+  if (window === null && handle !== null) return adoptWindow(createWindow(handle, appPaths()));
+  return window;
+}
+
 function quitGracefully(): void {
   trace("quitGracefully");
   shutdown ??= stopServerProcess();
@@ -503,8 +651,9 @@ async function main(): Promise<void> {
 
   handle = await startServer(paths);
   recordLine(`[desktop] serving ${handle.url}`);
+  registerDesktopBridge();
   Menu.setApplicationMenu(buildMenu(handle));
-  window = createWindow(handle, paths);
+  window = adoptWindow(createWindow(handle, paths));
 
   // The agent can die on its own (crashed extension, OOM). Surfacing that beats
   // leaving the user with a UI whose every action silently fails.
@@ -526,7 +675,7 @@ if (!gotLock) {
   });
 
   app.on("activate", () => {
-    if (window === null && handle !== null) window = createWindow(handle, appPaths());
+    mainWindow()?.focus();
   });
 
   app.on("window-all-closed", () => {

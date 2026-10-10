@@ -2,15 +2,25 @@
  * The desktop shell's preload bridge, as the web bundle sees it.
  *
  * `desktop/src/preload.cts` freezes this object onto the window; a browser page
- * never has it. That file keeps the shape deliberately data-only — no Node — so
- * a feature can branch on being wrapped without the shell becoming a dependency
- * of the UI. The one function (`getPathForFile`) is a string lookup, not a
- * channel: a browser cannot name the folder a user dragged in, and a shell can.
+ * never has it, and the UI branches on that rather than making the shell a
+ * dependency. Everything here is either preload-provided data or an action only
+ * the shell can take: `getPathForFile` is a string lookup (a browser cannot
+ * name the folder a user dragged in), while `notify` / `setBadge` /
+ * `onNotificationClick` are the OS-facing half of notifications — a page can
+ * raise its own toast, but only the shell can put a number on the Dock icon or
+ * bring the window back when that toast is clicked.
  *
  * The interface is restated here rather than imported: the desktop package is a
- * separate build with its own tsconfig and no exported types entry, and two
+ * separate build with its own tsconfig and no exported types entry, and a few
  * fields are cheaper to keep in step than a build ordering to maintain.
  */
+export interface DesktopNotification {
+  readonly title: string;
+  readonly body: string;
+  /** The session path, which also identifies the notice. */
+  readonly tag: string;
+}
+
 export interface PiWebDesktopBridge {
   readonly isDesktop: true;
   /** `process.platform` of the machine running the shell: `darwin`, `win32`… */
@@ -21,6 +31,16 @@ export interface PiWebDesktopBridge {
    * feature ships the same bridge without it; see `pathForFile`.
    */
   readonly getPathForFile?: (file: File) => string;
+  /**
+   * Ask the shell for a system notification. Optional for the same reason as
+   * `getPathForFile`: the fields are additive, so an older shell is a bridge
+   * with fewer of them rather than a different shape.
+   */
+  readonly notify?: (payload: DesktopNotification) => void;
+  /** The unread count on the Dock / taskbar icon; zero clears it. */
+  readonly setBadge?: (count: number) => void;
+  /** Listen for a click on a shell notification; returns the unsubscribe. */
+  readonly onNotificationClick?: (listener: (sessionPath: string) => void) => () => void;
 }
 
 declare global {

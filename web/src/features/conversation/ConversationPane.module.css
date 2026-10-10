@@ -3,6 +3,8 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  /* The hero's floating sidebar toggle positions against this column. */
+  position: relative;
 }
 
 .header {
@@ -149,4 +151,70 @@
 .headerPanelAction:hover {
   color: var(--dsw-alias-label-primary);
   background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/*
+ * The sidebar toggle: the same 26px circular hit as the panel toggle on the
+ * trailing edge, without the `margin-left: auto` that pushes that one across
+ * the row. `align-self: center` because the row aligns on the baseline for its
+ * two text spans and an icon has no baseline to align on.
+ *
+ * Shared with `.heroToggle` rather than copied: the hero's button is the same
+ * control in a different seat, and two definitions would drift.
+ */
+.headerIconAction,
+.heroToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 13px;
+  color: var(--dsw-alias-label-secondary);
+  background: none;
+  cursor: pointer;
+}
+
+.headerIconAction:hover,
+.heroToggle:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/*
+ * The hero's seat for that control: over the column's top-left corner rather
+ * than in a row of its own, because the hero centres itself in what is left and
+ * a row would push that centre down by its height. On macOS it clears the
+ * window-drag band `headerBlank` reserves above it, which would otherwise
+ * swallow the click.
+ */
+.heroToggle {
+  position: absolute;
+  top: 10px;
+  left: 22px;
+  z-index: 5;
+}
+
+:global(html[data-platform="darwin"]) .heroToggle {
+  top: 50px;
+}
+
+/*
+ * Both header controls at a fingertip's size. 26px is dsh's mouse-sized circle;
+ * on a touch device these two are what a phone user reaches for constantly —
+ * the session drawer and the panel — and a near-miss there is a nuisance. 34px
+ * still fits inside the 48px row without crowding the title.
+ */
+@media (pointer: coarse) {
+  .headerIconAction,
+  .heroToggle,
+  .headerPanelAction {
+    width: 34px;
+    height: 34px;
+    border-radius: 17px;
+  }
 }

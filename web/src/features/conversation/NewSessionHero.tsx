@@ -7,12 +7,13 @@ import {
   SendIcon,
 } from "../../components/icons.tsx";
 import { actions, appStore, useT } from "../../lib/app-state.ts";
+import { isCoarsePointer } from "../../lib/pointer.ts";
 import { PI_MARK_URL } from "../../lib/brand.ts";
 import { useStore } from "../../lib/store.ts";
 import { AttachmentInput, AttachmentStrip, AttachButton } from "./AttachmentStrip.tsx";
 import { DraftMirror } from "./DraftMirror.tsx";
 import { useReferenceDraft } from "./useReferenceDraft.ts";
-import { ModelPicker } from "./ModelPicker.tsx";
+import { ModelThinkingPicker } from "./ModelThinkingPicker.tsx";
 import { SlashMenu } from "./SlashMenu.tsx";
 import { useComposerState } from "./useComposerState.ts";
 import { useImageDraft } from "./useImageDraft.ts";
@@ -176,7 +177,13 @@ export function NewSessionHero() {
     // that replaces it once pi is ready. Only a model the user actually chose
     // is passed on: null means "start on pi's default", which is not the same
     // request as naming the model pi would have picked anyway.
-    actions.startDraftSession(project.id, outgoing, attachments, state.newSessionModel);
+    actions.startDraftSession(
+      project.id,
+      outgoing,
+      attachments,
+      state.newSessionModel,
+      state.newSessionThinkingLevel,
+    );
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -197,6 +204,10 @@ export function NewSessionHero() {
     }
 
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+      // The same rule the conversation composer draws: on a coarse pointer the
+      // Return key is the only newline there is, so it inserts one and the send
+      // disc is what starts the session.
+      if (isCoarsePointer()) return;
       event.preventDefault();
       submit();
     }
@@ -266,14 +277,19 @@ export function NewSessionHero() {
               inputRef={draft.fileInputRef}
               onFiles={(files) => void draft.attach(files)}
             />
-            <span className={styles.toolbarHint}>{t("hero.keyboardHint")}</span>
+            <span className={styles.toolbarHint}>
+              {t(isCoarsePointer() ? "hero.keyboardHintTouch" : "hero.keyboardHint")}
+            </span>
             {project ? (
-              <ModelPicker
+              <ModelThinkingPicker
                 model={composer.state?.model ?? null}
                 models={composer.state?.models ?? null}
+                level={composer.state?.thinkingLevel ?? null}
+                levels={composer.state?.model?.thinkingLevels ?? null}
                 loading={composer.modelsLoading}
-                onRequestModels={() => void composer.ensureLive()}
-                onSelect={(provider, id) => void composer.selectModel(provider, id)}
+                onRequest={() => void composer.ensureLive()}
+                onSelectModel={(provider, id) => void composer.selectModel(provider, id)}
+                onSelectThinking={(level) => void composer.selectThinking(level)}
               />
             ) : null}
             <button

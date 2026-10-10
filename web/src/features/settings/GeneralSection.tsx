@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { actions, appStore, useT } from "../../lib/app-state.ts";
 import type { Translate } from "../../lib/i18n/index.ts";
 import {
+  hasShellNotifications,
   notificationCapability,
   requestNotificationPermission,
   type NotificationCapability,
@@ -132,6 +133,10 @@ export function GeneralSection({ className }: { className?: string }) {
   const [notificationPermission, setNotificationPermission] = useState<NotificationCapability>(
     () => notificationCapability(),
   );
+  // Inside the desktop shell the notice, the badge and the click are the main
+  // process's job, so there is no web permission to gate on. Read per render
+  // rather than memoised: the bridge cannot change without a page reload.
+  const shellNotifications = hasShellNotifications();
   const projectPath =
     state.projects.find((project) => project.id === state.selectedProjectId)?.path ??
     state.projects[0]?.path ??
@@ -240,29 +245,36 @@ export function GeneralSection({ className }: { className?: string }) {
         </SettingsRow>
 
         {/*
-          A preference about this browser, not about the agent, so it sits with
-          the other shell-side rows rather than next to auto-compaction. The
-          description doubles as the failure message: a denied permission is
-          the one state where the switch cannot do what it says, and the way
-          back is only knowable in the browser's own settings.
+          A preference about the host, not about the agent, so it sits with
+          the other shell-side rows rather than next to auto-compaction. In a
+          browser the description doubles as the failure message: a denied
+          permission is the one state where the switch cannot do what it says,
+          and the way back is only knowable in the browser's own settings. The
+          shell needs neither — it raises the notice itself, and clicking it
+          comes back to the session — so that case describes the click instead.
         */}
         <SettingsRow
-          title={t("settings.browserNotifications.title")}
+          title={t("settings.notifications.title")}
           description={
-            notificationPermission === "unsupported"
-              ? t("settings.browserNotifications.unsupported")
-              : notificationPermission === "denied"
-                ? t("settings.browserNotifications.denied")
-                : t("settings.browserNotifications.description")
+            shellNotifications
+              ? t("settings.notifications.desktop.description")
+              : notificationPermission === "unsupported"
+                ? t("settings.notifications.unsupported")
+                : notificationPermission === "denied"
+                  ? t("settings.notifications.denied")
+                  : t("settings.notifications.description")
           }
         >
           <SettingsSwitch
-            label={t("settings.browserNotifications.title")}
+            label={t("settings.notifications.title")}
             checked={state.settings.browserNotifications}
-            disabled={notificationPermission === "unsupported"}
+            disabled={!shellNotifications && notificationPermission === "unsupported"}
             onChange={(enabled) => {
-              if (!enabled) {
-                void actions.updateSettings({ browserNotifications: false });
+              // Only the browser path has to ask: the shell's permission is the
+              // OS's, and its denial shows up as a missing notice rather than
+              // as a switch that cannot be turned on.
+              if (!enabled || shellNotifications) {
+                void actions.updateSettings({ browserNotifications: enabled });
                 return;
               }
               // The prompt has to be raised from inside the click, and its

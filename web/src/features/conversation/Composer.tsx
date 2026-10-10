@@ -12,11 +12,15 @@ import { DraftMirror } from "./DraftMirror.tsx";
 import { useImageDraft } from "./useImageDraft.ts";
 import { useReferenceDraft } from "./useReferenceDraft.ts";
 import { ContextMeter } from "./ContextMeter.tsx";
-import { ModelPicker } from "./ModelPicker.tsx";
+import { ModelThinkingPicker } from "./ModelThinkingPicker.tsx";
 import { SlashMenu } from "./SlashMenu.tsx";
 import { useSlashCompletion } from "./useSlashCompletion.ts";
 import styles from "./Composer.module.css";
 import { useT } from "../../lib/app-state.ts";
+import { isCoarsePointer } from "../../lib/pointer.ts";
+import { useStoreSelector } from "../../lib/store.ts";
+import { isNarrow } from "../../layout/columns.ts";
+import { layoutStore } from "../../layout/layout-state.ts";
 
 /**
  * The session's model, switchable list and context figures, supplied by
@@ -28,10 +32,15 @@ export interface ComposerSession {
   model: ComposerModel | null;
   models: ComposerModel[] | null;
   context: ComposerContext | null;
+  /** The thinking level in effect; null when nothing has recorded one. */
+  thinkingLevel: string | null;
   /** A live fetch is in flight (the cold start that learns the model list). */
   loading: boolean;
+  /** True once a running pi has answered for this session. */
+  live: boolean;
   onRequestLive(): void;
   onSelectModel(provider: string, id: string): void;
+  onSelectThinking(level: string): void;
 }
 
 export interface ComposerProps {
@@ -80,9 +89,10 @@ function deliveryOf(behavior: BusySendBehavior): "steer" | "followUp" {
  * under the transparent textarea, since a textarea cannot style part of its own
  * value.
  *
- * To the right of the input sit the session's model picker and context ring.
- * Both describe the session the text is about to be sent into, so they belong
- * to the input rather than to the transcript above it.
+ * To the right of the input sit the session's model picker, thinking-level
+ * picker and context ring. All three describe the session the text is about to
+ * be sent into, so they belong to the input rather than to the transcript
+ * above it.
  */
 export function Composer({
   isStreaming,
@@ -95,6 +105,12 @@ export function Composer({
   workspacePath,
 }: ComposerProps) {
   const t = useT();
+  // The placeholder is the widest thing the card holds, and a phone's card is
+  // one line tall: past that the text is clipped (see `Composer.module.css`).
+  // The short copy says the same two things — type, or `/` for commands — in
+  // the room there actually is. Subscribed to the width alone so a column
+  // resize re-renders the card only when the breakpoint is what moved.
+  const narrow = isNarrow(useStoreSelector(layoutStore, (state) => state.viewportWidth));
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -178,8 +194,14 @@ export function Composer({
       !event.altKey &&
       !event.nativeEvent.isComposing
     ) {
-      event.preventDefault();
+      // A soft keyboard has no Shift to reach for, and its Return key is the
+      // only newline the user has — so on a coarse pointer the plain key is
+      // left to the textarea and the send disc is the one way to submit.
+      // Cmd/Ctrl+Enter still sends, which is what an external keyboard on a
+      // tablet reaches for. A mouse-driven window keeps dsh's arrangement.
       const other = event.metaKey || event.ctrlKey;
+      if (isCoarsePointer() && !other) return;
+      event.preventDefault();
       // An idle agent has only one behavior, so the modifier is a no-op there.
       void submit(other ? (busySendBehavior === "queue" ? "steer" : "queue") : undefined);
     }
@@ -217,7 +239,11 @@ export function Composer({
             spellCheck={false}
             disabled={disabled}
             placeholder={
-              disabled ? t("composer.chooseOrCreate") : t("composer.placeholder")
+              disabled
+                ? t("composer.chooseOrCreate")
+                : narrow
+                  ? t("composer.placeholderShort")
+                  : t("composer.placeholder")
             }
             aria-label={t("composer.inputLabel")}
             onChange={(event) => {
@@ -251,12 +277,15 @@ export function Composer({
           <span className={styles.spacer} />
 
           {session ? (
-            <ModelPicker
+            <ModelThinkingPicker
               model={session.model}
               models={session.models}
+              level={session.thinkingLevel}
+              levels={session.model?.thinkingLevels ?? null}
               loading={session.loading}
-              onRequestModels={session.onRequestLive}
-              onSelect={session.onSelectModel}
+              onRequest={session.onRequestLive}
+              onSelectModel={session.onSelectModel}
+              onSelectThinking={session.onSelectThinking}
             />
           ) : null}
 

@@ -30,6 +30,14 @@ const modelChange = (id: string, parentId: string | null, provider: string, mode
   modelId,
 });
 
+const thinkingChange = (id: string, parentId: string | null, level: string) => ({
+  type: "thinking_level_change",
+  id,
+  parentId,
+  timestamp: "2026-01-01T00:00:00.750Z",
+  thinkingLevel: level,
+});
+
 const message = (id: string, parentId: string | null, role: string, content: unknown) => ({
   type: "message",
   id,
@@ -180,6 +188,7 @@ describe("readComposerFromDisk", () => {
       assistant("a1", "u1", "hi", { input: 500, output: 500, totalTokens: 20000 }),
       // A later switch wins: the composer shows what the session is on now.
       modelChange("m2", "a1", "cz", "deepseek-flash"),
+      thinkingChange("t1", "m2", "high"),
     ]);
 
     const state = await readComposerFromDisk(path);
@@ -190,10 +199,13 @@ describe("readComposerFromDisk", () => {
       name: "DeepSeek Flash",
       contextWindow: 200000,
       reasoning: true,
+      thinkingLevels: ["off", "minimal", "low", "medium", "high"],
     });
     expect(state.context).toEqual({ tokens: 20000, contextWindow: 200000, percent: 10 });
     // No process, so the switchable list is unknown rather than empty.
     expect(state.models).toBeNull();
+    // The level is pi's own, read back from the session file rather than guessed.
+    expect(state.thinkingLevel).toBe("high");
   });
 
   it("keeps the model even when models.json does not define it", async () => {
@@ -211,6 +223,9 @@ describe("readComposerFromDisk", () => {
       name: null,
       contextWindow: 0,
       reasoning: false,
+      // pi's catalog does not know this model, so its thinking levels are
+      // unknown rather than an invented "off".
+      thinkingLevels: null,
     });
     // Without a window there is nothing to measure against.
     expect(state.context).toBeNull();
@@ -219,7 +234,13 @@ describe("readComposerFromDisk", () => {
   it("reports no model for a session that never sent a request", async () => {
     const path = await writeSession(dir, [HEADER]);
     const state = await readComposerFromDisk(path);
-    expect(state).toEqual({ live: false, model: null, models: null, context: null });
+    expect(state).toEqual({
+      live: false,
+      model: null,
+      models: null,
+      context: null,
+      thinkingLevel: null,
+    });
   });
 });
 
@@ -255,6 +276,8 @@ describe("readComposerFromClient", () => {
         Promise.resolve({
           contextUsage: { tokens: 64000, contextWindow: 128000, percent: 50 },
         }),
+      getAvailableThinkingLevels: () =>
+        Promise.resolve(["off", "minimal", "low", "medium", "high"]),
       ...overrides,
     } as unknown as RpcClient;
   }
@@ -265,6 +288,13 @@ describe("readComposerFromClient", () => {
     expect(state.model?.id).toBe("deepseek-flash");
     expect(state.models?.map((m) => m.id)).toEqual(["deepseek-flash", "glm"]);
     expect(state.context).toEqual({ tokens: 64000, contextWindow: 128000, percent: 50 });
+    // The level is the process's own, and the levels it offers are what pi would
+    // clamp to — not a fixed list this module decided on. They hang off the
+    // model, because that is what they describe; the models that are not in
+    // effect carry none.
+    expect(state.thinkingLevel).toBe("medium");
+    expect(state.model?.thinkingLevels).toEqual(["off", "minimal", "low", "medium", "high"]);
+    expect(state.models?.find((m) => m.id === "glm")?.thinkingLevels).toBeNull();
   });
 
   it("fills in display names from the on-disk catalog", async () => {
@@ -325,6 +355,14 @@ describe("readComposerFromDefaults", () => {
       "cz/glm",
     ]);
     expect(state.model).toMatchObject({ provider: "cz", id: "glm", name: "GLM 5.3" });
+    // A reasoning model, with no per-model or global choice saved: pi would
+    // start on its own default (medium), which is inside this model's scale.
+    // The levels hang off each model, so a later hero switch follows it.
+    expect(state.model?.thinkingLevels).toEqual(["off", "minimal", "low", "medium", "high"]);
+    expect(state.thinkingLevel).toBe("medium");
+    expect(
+      state.models?.find((m) => m.id === "deepseek-flash")?.thinkingLevels,
+    ).toEqual(["off"]);
   });
 
   it("leaves out a provider with no credential", async () => {
@@ -337,6 +375,16 @@ describe("readComposerFromDefaults", () => {
     await seed({});
     const state = await readComposerFromDefaults(dir);
     expect(state.model?.id).toBe("deepseek-flash");
+    // That model does not reason, so its only level is `off` — the default
+    // `medium` is clamped down to it, the same way pi clamps on load.
+    expect(state.model?.thinkingLevels).toEqual(["off"]);
+    expect(state.thinkingLevel).toBe("off");
+  });
+
+  it("honours a saved thinking level over pi's default", async () => {
+    await seed({ defaultProvider: "cz", defaultModel: "glm", defaultThinkingLevel: "high" });
+    const state = await readComposerFromDefaults(dir);
+    expect(state.thinkingLevel).toBe("high");
   });
 
   it("falls back when the saved default is no longer available", async () => {

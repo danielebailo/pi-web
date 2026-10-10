@@ -10,7 +10,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "icons": "node scripts/render-icon.mjs",
-    "dev": "tsc -p tsconfig.json && electron .",
+    "dev": "node scripts/sign-dev-electron.mjs && tsc -p tsconfig.json && electron .",
     "package": "node scripts/package.mjs",
     "package:dir": "node scripts/package.mjs --dir"
   },

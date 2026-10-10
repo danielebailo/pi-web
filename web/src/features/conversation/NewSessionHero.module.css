@@ -4,7 +4,10 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 24px 8vh;
+  /* The keyboard's inset stacks on the resting lift for the same reason the
+     conversation composer's does: the frame does not shrink under a phone
+     keyboard, so the card would otherwise sit behind it. */
+  padding: 0 24px calc(8vh + var(--piws-keyboard-inset, 0px));
 }
 
 .inner {
@@ -296,6 +299,31 @@
 .send:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/*
+ * The hero's gutters are a desktop reading width, and its keyboard hint is about
+ * a key a touch user does not have — the send disc is the affordance there. Both
+ * go on a phone-sized frame, which leaves the toolbar with the attach control,
+ * the model picker and the disc, which is all it has room for.
+ */
+@media (max-width: 640px) {
+  .hero {
+    padding-inline: 12px;
+  }
+
+  .toolbarHint {
+    display: none;
+  }
+}
+
+/* Same reason as the conversation composer's disc: the one control every phone
+ * user presses gets a fingertip's size (`.send` is 34px in the desktop sheet). */
+@media (pointer: coarse) {
+  .send {
+    width: 40px;
+    height: 40px;
+  }
 }
 
 .warning {

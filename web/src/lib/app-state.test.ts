@@ -807,6 +807,73 @@ describe("task-finished notifications", () => {
   });
 });
 
+/**
+ * The desktop shell's half: a click on a shell notice opens the session it
+ * named, and the count of finished-but-unopened sessions rides on the shell's
+ * icon.
+ *
+ * The module is re-imported per test because both wirings happen once, at load
+ * time — the click listener while the module is evaluated, the badge
+ * subscription right after it.
+ */
+describe("desktop notifications", () => {
+  const PATH = "/home/me/.pi/agent/sessions/proj-abc/notify.jsonl";
+  const clickListeners: ((sessionPath: string) => void)[] = [];
+
+  /** Import app-state behind a shell bridge, capturing its click listener. */
+  async function freshApp() {
+    vi.resetModules();
+    const shell = {
+      notify: vi.fn(),
+      setBadge: vi.fn(),
+      onNotificationClick: vi.fn((listener: (sessionPath: string) => void) => {
+        clickListeners.push(listener);
+        return () => {};
+      }),
+    };
+    vi.stubGlobal("window", {
+      piWebDesktop: {
+        isDesktop: true,
+        platform: "darwin",
+        electronVersion: "44.0.0",
+        ...shell,
+      },
+    });
+    return { app: await import("./app-state.ts"), shell };
+  }
+
+  beforeEach(() => {
+    clickListeners.length = 0;
+  });
+
+  afterEach(() => {
+    // Put the host locale back: `unstubAllGlobals` also removes the file-level
+    // `navigator` stub the copy assertions depend on.
+    vi.unstubAllGlobals();
+    vi.stubGlobal("navigator", { language: "zh-CN" });
+  });
+
+  it("counts a finished session the user has not opened, and clears it on open", async () => {
+    const { app, shell } = await freshApp();
+
+    app.actions.emitSessionEvent(PATH, { type: "agent_start" });
+    app.actions.emitSessionEvent(PATH, { type: "agent_settled" });
+
+    expect(shell.setBadge).toHaveBeenLastCalledWith(1);
+
+    app.actions.selectSession(PATH);
+    expect(shell.setBadge).toHaveBeenLastCalledWith(0);
+  });
+
+  it("opens the session the shell notice named", async () => {
+    const { app } = await freshApp();
+
+    clickListeners[0]?.(PATH);
+
+    expect(app.appStore.get().selectedSessionPath).toBe(PATH);
+  });
+});
+
 describe("deleting a session", () => {
   it("clears the selection and says where the file went", async () => {
     mocked.deleteSession.mockResolvedValue({ ok: true, method: "trash" });
@@ -855,7 +922,7 @@ describe("new session hero", () => {
     expect(isDraftSession(appStore.get().selectedSessionPath)).toBe(true);
     // No model chosen means "start on pi's default", which is not the same
     // request as naming the model pi would have picked anyway.
-    expect(mocked.createSession).toHaveBeenCalledWith("project-1", null);
+    expect(mocked.createSession).toHaveBeenCalledWith("project-1", null, null);
 
     create.resolve({ sessionPath: REAL_PATH, sessionId: "s1", projectPath: "/home/me/proj", prewarmed: false });
 
@@ -879,14 +946,14 @@ describe("new session hero", () => {
 
   it("hands the picked model to the session being created, once", async () => {
     const create = deferredCreate();
-    const picked = { provider: "cz", id: "glm", name: "GLM 5.3", contextWindow: 64000, reasoning: true };
+    const picked = { provider: "cz", id: "glm", name: "GLM 5.3", contextWindow: 64000, reasoning: true, thinkingLevels: ["off", "low", "high"] };
     actions.setNewSessionModel(picked);
 
     // The hero reads the choice off the store and passes it along, which is
     // what this mirrors.
     actions.startDraftSession("project-1", "hello", [], appStore.get().newSessionModel);
 
-    expect(mocked.createSession).toHaveBeenCalledWith("project-1", picked);
+    expect(mocked.createSession).toHaveBeenCalledWith("project-1", picked, null);
     // Consumed by the session it was chosen for: the next new session starts
     // from pi's default again.
     expect(appStore.get().newSessionModel).toBeNull();
@@ -914,10 +981,55 @@ describe("new session hero", () => {
     expect(appStore.get().notice).toBe("无法切换到 cz/gone：Model not found");
   });
 
+  it("hands the picked thinking level to the session being created, once", async () => {
+    const create = deferredCreate();
+    actions.setNewSessionThinkingLevel("high");
+
+    actions.startDraftSession(
+      "project-1",
+      "hello",
+      [],
+      null,
+      appStore.get().newSessionThinkingLevel,
+    );
+
+    expect(mocked.createSession).toHaveBeenCalledWith("project-1", null, "high");
+    // Consumed by the session it was chosen for, exactly like the model.
+    expect(appStore.get().newSessionThinkingLevel).toBeNull();
+
+    create.resolve({ sessionPath: REAL_PATH, sessionId: "s1", projectPath: "/home/me/proj", prewarmed: false });
+    await vi.waitFor(() => {
+      expect(appStore.get().selectedSessionPath).toBe(REAL_PATH);
+    });
+  });
+
+  it("reports a thinking level the session could not start on, and keeps the session", async () => {
+    const create = deferredCreate();
+    actions.startDraftSession("project-1", "hello");
+    create.resolve({
+      sessionPath: REAL_PATH,
+      sessionId: "s1",
+      projectPath: "/home/me/proj",
+      prewarmed: false,
+      thinkingError: "无法设置思考强度为 impossible：invalid level",
+    });
+
+    await vi.waitFor(() => {
+      expect(appStore.get().selectedSessionPath).toBe(REAL_PATH);
+    });
+    expect(appStore.get().notice).toBe("无法设置思考强度为 impossible：invalid level");
+  });
+
   it("drops the picked model when the user leaves the new-session flow", () => {
-    actions.setNewSessionModel({ provider: "cz", id: "glm", name: null, contextWindow: 0, reasoning: false });
+    actions.setNewSessionModel({ provider: "cz", id: "glm", name: null, contextWindow: 0, reasoning: false, thinkingLevels: ["off"] });
     actions.selectSession(REAL_PATH);
     expect(appStore.get().newSessionModel).toBeNull();
+  });
+
+  it("drops the picked thinking level when the user opens another session", () => {
+    actions.setNewSessionThinkingLevel("max");
+    actions.selectSession(REAL_PATH);
+    expect(appStore.get().newSessionThinkingLevel).toBeNull();
   });
 });
 

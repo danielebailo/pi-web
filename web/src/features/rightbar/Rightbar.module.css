@@ -21,6 +21,11 @@
   width: auto;
   border-left: none;
   box-shadow: var(--dsw-elevation-float);
+  /* Fixed, so the shell's insets never reach it: this presentation covers the
+     notch band and the home indicator and has to clear both. */
+  box-sizing: border-box;
+  padding-top: var(--piws-safe-top);
+  padding-bottom: var(--piws-safe-bottom);
 }
 
 .resizeHandle {
@@ -151,6 +156,35 @@
 .chipClose:hover {
   background: var(--dsw-alias-interactive-bg-hover-solid);
   color: var(--dsw-alias-label-primary);
+}
+
+/*
+ * The close control is a hover reveal, and on a touch device that would leave
+ * every tab but the active one with no way to close it — two taps instead of
+ * one, the second on a tab the user did not ask for. It stays painted there.
+ */
+@media (hover: none) {
+  .chipClose {
+    display: inline-flex;
+  }
+}
+
+/* The strip and the two controls inside it, at a fingertip's size: 40px is
+ * dsh's mouse row, and 18px and 24px are both under the touch minimum. */
+@media (pointer: coarse) {
+  .strip {
+    min-height: 48px;
+  }
+
+  .chipClose {
+    width: 22px;
+    height: 22px;
+  }
+
+  .addButton {
+    width: 32px;
+    height: 32px;
+  }
 }
 
 .addWrap {
@@ -589,4 +623,18 @@
 
 .floatResize:hover::after {
   border-color: var(--dsw-alias-label-tertiary);
+}
+
+/*
+ * The divider's grip and a floating panel's resize corner are hover reveals,
+ * and a touch device has no hover to reveal them with. They are also the only
+ * thing that says either is draggable — the seam is an 8px strip with no fill —
+ * so they stay painted there. The drags themselves are unchanged: both run
+ * through `useGesture`, which is pointer-agnostic.
+ */
+@media (hover: none) {
+  .rowDivider::after,
+  .floatResize::after {
+    opacity: 1;
+  }
 }

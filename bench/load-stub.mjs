@@ -93,6 +93,18 @@ process.stdin.on("data", (chunk) => {
       case "get_messages":
         respond("get_messages", { messages: [] }, message.id);
         break;
+      // The composer route asks for these whenever a session is resident, even
+      // under load; without them the stub's "not implemented" reply would turn
+      // a harmless background read into an error.
+      case "get_available_models":
+        respond("get_available_models", { models: [] }, message.id);
+        break;
+      case "get_available_thinking_levels":
+        respond("get_available_thinking_levels", { levels: ["off"] }, message.id);
+        break;
+      case "get_session_stats":
+        respond("get_session_stats", {}, message.id);
+        break;
       case "prompt":
         respond("prompt", undefined, message.id);
         streamEvents();

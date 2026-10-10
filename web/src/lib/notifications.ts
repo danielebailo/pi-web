@@ -1,13 +1,32 @@
 /**
- * Browser notifications, behind one module so nothing else touches the
- * `Notification` API directly.
+ * Notifications, behind one module so nothing else touches the `Notification`
+ * API or the shell bridge directly.
  *
- * Two reasons for the wrapper. The API does not exist everywhere the store is
+ * Three reasons for the wrapper. The API does not exist everywhere the store is
  * imported — jsdom in tests, and any non-secure origin in a real browser — so
- * every call needs the same "is it even here" guard. And the permission flow is
- * a user gesture followed by an async answer the caller has to turn into a
- * settings write, which is easier to get right in one place.
+ * every call needs the same "is it even here" guard. The permission flow is a
+ * user gesture followed by an async answer the caller has to turn into a
+ * settings write, which is easier to get right in one place. And inside the
+ * desktop shell the notice, the badge and the click all belong to the main
+ * process, so those three jobs have a second implementation the rest of the UI
+ * should not have to know about.
  */
+import { desktopBridge, type PiWebDesktopBridge } from "./desktop.ts";
+
+/**
+ * The shell's notification bridge, when this page is inside the desktop window
+ * and that shell is new enough to have it. A browser gets null here and keeps
+ * the Web Notification path below.
+ */
+function shellNotifications(): PiWebDesktopBridge | null {
+  const bridge = desktopBridge();
+  return bridge?.notify !== undefined ? bridge : null;
+}
+
+/** True when notifications are raised by the shell rather than the browser. */
+export function hasShellNotifications(): boolean {
+  return shellNotifications() !== null;
+}
 
 /**
  * `unsupported` is not a permission value: it is this app's word for "there is
@@ -55,6 +74,14 @@ export function showNotification(
   tag: string,
   onClick?: () => void,
 ): void {
+  const shellNotify = shellNotifications()?.notify;
+  if (shellNotify !== undefined) {
+    // The shell owns the notice from here. Its click comes back over
+    // `subscribeNotificationClicks` rather than this call's `onClick`, because
+    // the notice outlives the call — the page may even have reloaded since.
+    shellNotify({ title, body, tag });
+    return;
+  }
   const api = notificationApi();
   if (api === null || api.permission !== "granted") return;
   try {
@@ -71,4 +98,29 @@ export function showNotification(
     // Some mobile browsers only allow construction from a service worker. A
     // missing toast must never take the completion path down with it.
   }
+}
+
+/** The last count handed to the shell, so a settled store is not an IPC send. */
+let lastBadge = -1;
+
+/**
+ * Mirror the unread count onto the shell's icon. A no-op in a browser, and a
+ * no-op when the number has not moved — the caller is a store subscription that
+ * fires on every state change.
+ */
+export function setNotificationBadge(count: number): void {
+  const setBadge = shellNotifications()?.setBadge;
+  if (setBadge === undefined || count === lastBadge) return;
+  lastBadge = count;
+  setBadge(count);
+}
+
+/**
+ * Route a click on a shell notification back to the session it named. Returns
+ * the unsubscribe, or a no-op in a browser so a caller can register
+ * unconditionally.
+ */
+export function subscribeNotificationClicks(listener: (sessionPath: string) => void): () => void {
+  const subscribe = shellNotifications()?.onNotificationClick;
+  return subscribe === undefined ? () => {} : subscribe(listener);
 }

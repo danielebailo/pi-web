@@ -3,6 +3,8 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import clsx from "clsx";
 import { appStore, useT } from "../../lib/app-state.ts";
 import { useStore } from "../../lib/store.ts";
+import { layoutActions, layoutStore, sidebarGeometry } from "../../layout/layout-state.ts";
+import { computeColumns, isNarrow } from "../../layout/columns.ts";
 import {
   containsPoint,
   dividerSizes,
@@ -102,6 +104,17 @@ export function Rightbar() {
     rightbarActions.ensureSurface(sessionPath);
   }, [sessionPath]);
 
+  // A drawer and this panel cannot both own a narrow frame, so opening the
+  // panel takes it back. dsh states the same rule where it opens the right
+  // sidebar (`openRightbar` clears the narrow override); here it is an effect
+  // rather than a call site because this panel opens from several places — the
+  // conversation header, a turn's changed-files card, and the dock's own
+  // controls — and none of them is the owner of the frame's geometry.
+  const open = surface?.open === true;
+  useEffect(() => {
+    if (open) layoutActions.collapseNarrow();
+  }, [open]);
+
   if (sessionPath.length === 0 || project === null) return null;
   if (surface === undefined) return null;
 
@@ -156,7 +169,21 @@ function Panel({
     setSizes(null);
   });
 
-  const fullscreen = surface.mode === "fullscreen";
+  const layout = useStore(layoutStore);
+  const sidebar = sidebarGeometry(layout);
+  // `autoFullscreen`: on a frame too narrow to hold this panel beside the
+  // conversation, the panel is presented fullscreen whatever mode the surface
+  // recorded. A presentation rule rather than a stored one — the user's own
+  // choice survives it, and widening the frame restores exactly what they had.
+  // dsh's rule of the same name, applied in the same place.
+  const autoFullscreen = isNarrow(layout.viewportWidth);
+  const fullscreen = autoFullscreen || surface.mode === "fullscreen";
+  // The rendered width is the column solve's verdict, not the stored
+  // preference: the centre's `CENTER_MIN` and the frame's ratio cap both have
+  // to be settled before this panel takes its room. The drag handle reports the
+  // rendered width as its origin, so grabbing the edge never jumps back to a
+  // preference the frame was not honouring.
+  const width = computeColumns(layout.viewportWidth, sidebar.width, surface.width).rightbar;
   const splitAllowed = canSplitDock(surface);
   const menuTab = menu === null ? null : (surface.tabs[menu.tabId] ?? null);
   const shares = surface.panes.length === 2 ? (sizes ?? surface.sizes ?? [0.5, 0.5]) : [1];
@@ -236,23 +263,28 @@ function Panel({
 
   const chrome = (
     <>
-      <button
-        type="button"
-        className={styles.panelControl}
-        title={shortcutTitle(
-          t,
-          fullscreen ? t("rightbar.exitFullscreen") : t("rightbar.fullscreen"),
-          "rightbar.fullscreen",
-        )}
-        aria-label={fullscreen ? t("rightbar.exitFullscreen") : t("rightbar.fullscreen")}
-        data-rb-mode={fullscreen ? "push" : "fullscreen"}
-        onClick={(event) => {
-          event.stopPropagation();
-          rightbarActions.setMode(sessionPath, fullscreen ? "push" : "fullscreen");
-        }}
-      >
-        {fullscreen ? <RestoreIcon width={14} height={14} /> : <FullscreenIcon width={14} height={14} />}
-      </button>
+      {/* On a narrow frame the panel is already fullscreen, so this control has
+          nothing left to say — it would offer to make the panel what it already
+          is. The collapse control beside it is the way back out. */}
+      {autoFullscreen ? null : (
+        <button
+          type="button"
+          className={styles.panelControl}
+          title={shortcutTitle(
+            t,
+            fullscreen ? t("rightbar.exitFullscreen") : t("rightbar.fullscreen"),
+            "rightbar.fullscreen",
+          )}
+          aria-label={fullscreen ? t("rightbar.exitFullscreen") : t("rightbar.fullscreen")}
+          data-rb-mode={fullscreen ? "push" : "fullscreen"}
+          onClick={(event) => {
+            event.stopPropagation();
+            rightbarActions.setMode(sessionPath, fullscreen ? "push" : "fullscreen");
+          }}
+        >
+          {fullscreen ? <RestoreIcon width={14} height={14} /> : <FullscreenIcon width={14} height={14} />}
+        </button>
+      )}
       <button
         type="button"
         className={styles.panelControl}
@@ -272,11 +304,11 @@ function Panel({
   return (
     <aside
       className={clsx(styles.panel, fullscreen && styles.fullscreen)}
-      style={fullscreen ? undefined : { width: `${String(surface.width)}px` }}
+      style={fullscreen ? undefined : { width: `${String(width)}px` }}
       aria-label={t("rightbar.title")}
       data-rb-panel
     >
-      {fullscreen ? null : <ResizeHandle sessionPath={sessionPath} width={surface.width} />}
+      {fullscreen ? null : <ResizeHandle sessionPath={sessionPath} width={width} />}
       {/* The row scrolls in two dimensions never: a pane's own body is the only
           scroller, and a strip's chips scroll on their own. */}
       <div className={styles.row} ref={rowRef} data-rb-row>

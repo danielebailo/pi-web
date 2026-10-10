@@ -1,20 +1,37 @@
 .shell {
   display: flex;
   height: 100%;
+  /*
+   * The frame is the whole viewport under `viewport-fit=cover`, so the shell is
+   * what keeps content clear of the notch and the home indicator. `border-box`
+   * because `height: 100%` has to mean the padded height — otherwise the four
+   * insets would push the frame past the viewport it is filling.
+   *
+   * Every inset is 0 on a desktop browser and in the Electron shell, which is
+   * why this needs no platform branch to leave those unchanged.
+   */
+  box-sizing: border-box;
+  padding: var(--piws-safe-top) var(--piws-safe-right) var(--piws-safe-bottom)
+    var(--piws-safe-left);
   background: var(--dsw-alias-bg-base);
   color: var(--dsw-alias-label-primary);
   overflow: hidden;
 }
 
 .sidebar {
-  /* dsh's SIDEBAR_DEFAULT (columns.ts). Its 264/420 clamp pair only matters
-     while dragging, and this shell has no sidebar drag handle — the width is
-     the default and nothing else. */
-  flex: 0 0 var(--piws-sidebar-width, 280px);
-  width: var(--piws-sidebar-width, 280px);
+  /* The width is deliberately not stated here: it is one of three tracks that
+     have to fit together, so it comes from the column solve
+     (`layout/columns.ts`) and arrives as an inline `flex-basis` from
+     `AppLayout`. `min-width: 0` and the clip are what let a collapsed track
+     actually reach zero — a flex item's automatic minimum size is its
+     content's, so without them the column would stop shrinking at whatever the
+     widest row inside it needs. */
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
+  overflow: hidden;
   /*
    * dsh's sidebar surface. The colour is not a flat fill: dsh paints the
    * column with two washes over the fill — a blue one off the top, gone by a
@@ -169,4 +186,59 @@
   justify-content: center;
   color: var(--dsw-alias-label-tertiary);
   font-size: 13px;
+}
+
+/*
+ * The narrow frame's two modes, both driven by `sidebarGeometry`
+ * (`layout-state.ts`) rather than by a media query — see that file for why the
+ * frame measures itself instead.
+ *
+ * `.sidebarCollapsed` is the wide frame with the column put away: a zero-width
+ * flex track still draws its 0.5px border, which would read as a stray hairline
+ * against the centre.
+ */
+.sidebarCollapsed {
+  border-right: none;
+}
+
+/*
+ * `.sidebarOverlay` is the drawer: a frame too narrow to hold the column beside
+ * the conversation, so it hangs over the centre instead.
+ *
+ * It takes no track — the centre keeps every pixel it already had, which is the
+ * point of a drawer — and it is `position: fixed`, so it leaves the flex row
+ * entirely. `min(86vw, 320px)` leaves a strip of the conversation visible: a
+ * drawer that covers the whole frame gives no clue that there is anything
+ * underneath to go back to.
+ *
+ * The background has to be restated for macOS below, where the base rule hands
+ * the column over to the window's vibrancy: a drawer floats over content, and
+ * content showing through it would be unreadable.
+ */
+.sidebarOverlay {
+  position: fixed;
+  inset-block: 0;
+  left: 0;
+  z-index: 25;
+  flex: none;
+  width: min(86vw, 320px);
+  border-right: none;
+  box-shadow: var(--dsw-elevation-float);
+  /* Fixed, so the shell's own insets never reach it: the drawer covers the
+     notch band and the home indicator, and has to keep its rows out of both. */
+  box-sizing: border-box;
+  padding-top: var(--piws-safe-top);
+  padding-bottom: var(--piws-safe-bottom);
+}
+
+/* The drawer's dismissal: the conversation underneath, dimmed and clickable. */
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 24;
+  background: rgb(0 0 0 / 0.32);
+}
+
+:global(html[data-platform="darwin"]) .sidebarOverlay {
+  background: color-mix(in srgb, var(--dsw-specific-sidebar-fill) 90%, transparent);
 }

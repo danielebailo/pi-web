@@ -66,6 +66,57 @@ describe("readProviders", () => {
     expect(await readProviders()).toEqual([]);
   });
 
+  it("reports the capacity and input types a model declares", async () => {
+    await seed(
+      {
+        providers: {
+          cz: {
+            name: "cz",
+            models: [
+              {
+                id: "m",
+                name: "M",
+                contextWindow: 1_000_000,
+                maxTokens: 16_384,
+                input: ["text", "image"],
+              },
+            ],
+          },
+        },
+      },
+      {},
+    );
+
+    expect((await readProviders())[0]!.models).toEqual([
+      { id: "m", name: "M", contextWindow: 1_000_000, maxTokens: 16_384, input: ["text", "image"] },
+    ]);
+  });
+
+  it("drops a capacity or modality pi would refuse, instead of failing the page", async () => {
+    // pi's schema takes a positive number and the two modality literals; a file
+    // hand-edited to something else should still open a settings page, because
+    // the user needs one to fix it in.
+    await seed(
+      {
+        providers: {
+          cz: {
+            name: "cz",
+            models: [
+              { id: "bad", contextWindow: "1M", maxTokens: -5, input: ["text", "audio"] },
+              { id: "zero", contextWindow: 0 },
+            ],
+          },
+        },
+      },
+      {},
+    );
+
+    expect((await readProviders())[0]!.models).toEqual([
+      { id: "bad", input: ["text"] },
+      { id: "zero" },
+    ]);
+  });
+
   it("merges models.json definitions with auth.json credentials", async () => {
     await seed(real, { cz: { type: "api_key", key: "sk-cz" } });
 
@@ -340,9 +391,11 @@ describe("deleteProvider", () => {
 });
 
 describe("saveProvider model merging", () => {
-  it("keeps every field of a model the editor only renders an id and name for", async () => {
+  it("keeps the fields a model row does not render", async () => {
     // Caught by running the real UI: renaming a provider came back with every
     // model stripped to `{id, name}`, dropping a declared 1M context window.
+    // The row now renders the capacities too, so what has to survive an edit is
+    // what it still knows nothing about.
     await seed(
       {
         providers: {
@@ -359,6 +412,7 @@ describe("saveProvider model merging", () => {
                 cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
                 thinkingLevelMap: { max: "max" },
                 compat: { supportsDeveloperRole: false },
+                inputLimits: { images: { resize: { maxWidth: 1568 } } },
               },
             ],
           },
@@ -367,9 +421,22 @@ describe("saveProvider model merging", () => {
       {},
     );
 
-    // What the editor sends back after a rename: only id and name per model.
+    // What the editor sends back after a rename: id and name, plus the fields
+    // its row renders — read from what it was handed, not from a default.
     await saveProvider(
-      { id: "cz", name: "Renamed", models: [{ id: "deepseek-flash", name: "DeepSeek Flash" }] },
+      {
+        id: "cz",
+        name: "Renamed",
+        models: [
+          {
+            id: "deepseek-flash",
+            name: "DeepSeek Flash",
+            contextWindow: 1000000,
+            maxTokens: 16384,
+            input: ["text", "image"],
+          },
+        ],
+      },
       "update",
     );
 
@@ -383,12 +450,26 @@ describe("saveProvider model merging", () => {
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       thinkingLevelMap: { max: "max" },
       compat: { supportsDeveloperRole: false },
+      inputLimits: { images: { resize: { maxWidth: 1568 } } },
     });
   });
 
-  it("updates a model's display name without touching its other fields", async () => {
+  it("updates a model's display name without touching fields it cannot render", async () => {
     await seed(
-      { providers: { cz: { name: "cz", models: [{ id: "m", name: "Old", contextWindow: 4096 }] } } },
+      {
+        providers: {
+          cz: {
+            name: "cz",
+            models: [
+              {
+                id: "m",
+                name: "Old",
+                cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+              },
+            ],
+          },
+        },
+      },
       {},
     );
 
@@ -397,8 +478,61 @@ describe("saveProvider model merging", () => {
     expect((await readModelsFile()).providers.cz.models[0]).toEqual({
       id: "m",
       name: "New",
-      contextWindow: 4096,
+      cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
     });
+  });
+
+  it("writes the capacity and input fields the model row edits", async () => {
+    await seed({ providers: { cz: { name: "cz", models: [{ id: "m" }] } } }, {});
+
+    await saveProvider(
+      {
+        id: "cz",
+        models: [{ id: "m", contextWindow: 1_000_000, maxTokens: 16_384, input: ["text", "image"] }],
+      },
+      "update",
+    );
+
+    expect((await readModelsFile()).providers.cz.models[0]).toEqual({
+      id: "m",
+      contextWindow: 1_000_000,
+      maxTokens: 16_384,
+      input: ["text", "image"],
+    });
+  });
+
+  it("removes a capacity the editor left blank, so pi inherits again", async () => {
+    await seed(
+      {
+        providers: {
+          cz: {
+            name: "cz",
+            models: [{ id: "m", contextWindow: 4096, maxTokens: 1000, input: ["text"] }],
+          },
+        },
+      },
+      {},
+    );
+
+    await saveProvider({ id: "cz", models: [{ id: "m" }] }, "update");
+
+    expect((await readModelsFile()).providers.cz.models[0]).toEqual({ id: "m" });
+  });
+
+  it("refuses to store a count pi's schema would reject", async () => {
+    // An unreadable capacity box holds `NaN`, and JSON turns that into `null` on
+    // the wire; a `null` in models.json stops pi from reading the whole file.
+    await seed(
+      { providers: { cz: { name: "cz", models: [{ id: "m", contextWindow: 4096 }] } } },
+      {},
+    );
+
+    await saveProvider(
+      { id: "cz", models: [{ id: "m", contextWindow: Number.NaN, maxTokens: 0 }] },
+      "update",
+    );
+
+    expect((await readModelsFile()).providers.cz.models[0]).toEqual({ id: "m" });
   });
 
   it("drops a name that was cleared, rather than storing an empty string", async () => {
@@ -428,6 +562,55 @@ describe("saveProvider model merging", () => {
     await saveProvider({ id: "cz", models: [{ id: "fresh", name: "Fresh" }] }, "update");
 
     expect((await readModelsFile()).providers.cz.models).toEqual([{ id: "fresh", name: "Fresh" }]);
+  });
+
+  it("stores the thinking fields the editor declares, and clears the ones it empties", async () => {
+    await seed({ providers: { cz: { name: "cz", models: [{ id: "m" }] } } }, {});
+
+    await saveProvider(
+      { id: "cz", models: [{ id: "m", reasoning: true, thinkingLevelMap: { max: "max" } }] },
+      "update",
+    );
+    expect((await readModelsFile()).providers.cz.models[0]).toEqual({
+      id: "m",
+      reasoning: true,
+      thinkingLevelMap: { max: "max" },
+    });
+
+    // `false` is a statement — pi reads it as "this model does not think" — so
+    // it is stored; an empty map is the editor saying "no extra levels", so the
+    // field goes away rather than sitting there empty.
+    await saveProvider(
+      { id: "cz", models: [{ id: "m", reasoning: false, thinkingLevelMap: {} }] },
+      "update",
+    );
+    expect((await readModelsFile()).providers.cz.models[0]).toEqual({
+      id: "m",
+      reasoning: false,
+    });
+  });
+
+  it("reads the thinking fields back for the checkboxes", async () => {
+    await seed(
+      {
+        providers: {
+          cz: {
+            name: "cz",
+            models: [{ id: "m", reasoning: true, thinkingLevelMap: { xhigh: "xhigh", low: null } }],
+          },
+        },
+      },
+      {},
+    );
+
+    const [provider] = await readProviders();
+    // `low: null` rides along: it is how a hand-written entry disables a level,
+    // and the editor has to tell that apart from a level that exists.
+    expect(provider!.models[0]).toEqual({
+      id: "m",
+      reasoning: true,
+      thinkingLevelMap: { xhigh: "xhigh", low: null },
+    });
   });
 
   it("leaves the model list alone when the editor sends none", async () => {
@@ -573,6 +756,63 @@ describe("fetchProviderModels", () => {
       res.end(JSON.stringify(["m1", "m2"]));
     };
     expect(await fetchProviderModels({ baseUrl: base })).toEqual([{ id: "m1" }, { id: "m2" }]);
+  });
+
+  it("keeps the capabilities a gateway volunteers alongside the id", async () => {
+    respond = (res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          data: [
+            {
+              id: "openrouter-ish",
+              name: "OpenRouter-ish",
+              architecture: { input_modalities: ["text", "image"] },
+              supported_parameters: ["tools", "reasoning"],
+              top_provider: { context_length: 200000, max_completion_tokens: 32000 },
+            },
+            { id: "vllm-ish", max_model_len: 131072, capabilities: { reasoning: true, vision: true } },
+          ],
+        }),
+      );
+    };
+
+    expect(await fetchProviderModels({ baseUrl: base })).toEqual([
+      {
+        id: "openrouter-ish",
+        name: "OpenRouter-ish",
+        contextWindow: 200000,
+        maxTokens: 32000,
+        input: ["text", "image"],
+        reasoning: true,
+      },
+      { id: "vllm-ish", contextWindow: 131072, input: ["image"], reasoning: true },
+    ]);
+  });
+
+  it("copies only an affirmation of reasoning, and only a usable count", async () => {
+    // A gateway's `reasoning: false` can mean "returns no reasoning text" as
+    // easily as "cannot reason", and pi would take the first as the second and
+    // hide the ladder on a model that has one. Saying nothing leaves pi's own
+    // catalog in charge, which is the safe direction.
+    respond = (res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          data: [
+            { id: "denied", reasoning: false },
+            { id: "stringy", context_length: "128000" },
+            { id: "junk", contextWindow: 0, max_tokens: -1, input: ["audio"] },
+          ],
+        }),
+      );
+    };
+
+    expect(await fetchProviderModels({ baseUrl: base })).toEqual([
+      { id: "denied" },
+      { id: "stringy", contextWindow: 128000 },
+      { id: "junk" },
+    ]);
   });
 
   it("reports an empty catalog as an empty list, not an error", async () => {

@@ -194,6 +194,18 @@
   opacity: 1;
 }
 
+/*
+ * A hover reveal with no hover: on a touch device the stepper would look like a
+ * read-only field, which is exactly what it is not. The arrows stay painted
+ * there; they are also the control that adjusts the value, so leaving them
+ * hidden would leave the setting unreachable.
+ */
+@media (hover: none) {
+  .stepperArrows {
+    opacity: 1;
+  }
+}
+
 .stepperArrow {
   display: inline-flex;
   justify-content: center;

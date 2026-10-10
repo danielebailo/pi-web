@@ -67,6 +67,17 @@
   opacity: 1;
 }
 
+/*
+ * A hover reveal with no hover to reveal it: on a touch device the button that
+ * takes a picture back off the draft would never be reachable. It stays
+ * painted there — the draft's own thumbnail is the context it needs.
+ */
+@media (hover: none) {
+  .remove {
+    opacity: 1;
+  }
+}
+
 .remove svg {
   width: 10px;
   height: 10px;

@@ -52,7 +52,12 @@ function resolvePiVersion() {
 if (!existsSync(join(repoRoot, "server", "build", "index.js")) || !existsSync(join(repoRoot, "web", "dist", "index.html"))) {
   fail("缺少 server/build 或 web/dist，先在仓库根目录跑 `pnpm build`");
 }
-for (const file of ["main.cjs", "preload.cjs"]) {
+/**
+ * 壳自己的编译产物。`main.cjs` 会 require 其余几个，所以都要装进应用目录 ——
+ * 漏一个就是打出来的包启动即报错。
+ */
+const shellBundles = ["main.cjs", "preload.cjs", "badge-overlay.cjs"];
+for (const file of shellBundles) {
   if (!existsSync(join(desktopDir, "build", file))) {
     fail(`缺少 desktop/build/${file}，先跑 \`pnpm --filter pi-web-simple-desktop run build\``);
   }
@@ -67,8 +72,9 @@ await mkdir(appDir, { recursive: true });
 
 await cp(join(repoRoot, "server", "build"), join(appDir, "server", "build"), { recursive: true });
 await cp(join(repoRoot, "web", "dist"), join(appDir, "web", "dist"), { recursive: true });
-await cp(join(desktopDir, "build", "main.cjs"), join(appDir, "main.cjs"));
-await cp(join(desktopDir, "build", "preload.cjs"), join(appDir, "preload.cjs"));
+for (const file of shellBundles) {
+  await cp(join(desktopDir, "build", file), join(appDir, file));
+}
 
 // 安装包要能自证出处：自己的 MIT 许可，以及那份必须随二进制一起分发的第三方声明
 // （里面含自带的 Node.js 运行时）。两者都放在应用目录根部，菜单里的

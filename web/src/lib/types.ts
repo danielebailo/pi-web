@@ -221,6 +221,12 @@ export interface ComposerModel {
   /** 0 when unknown, matching pi's own `contextWindow ?? 0`. */
   contextWindow: number;
   reasoning: boolean;
+  /**
+   * The thinking levels this model accepts; null is "unknown", `["off"]` is
+   * "this model does not reason". It lives on the model rather than the session
+   * because the hero chooses the model before the session exists.
+   */
+  thinkingLevels: string[] | null;
 }
 
 /** How full the model's context window is, per pi's own estimate. */
@@ -235,15 +241,18 @@ export interface ComposerContext {
  * What the composer's right-hand controls render.
  *
  * `live: false` means this was read from the session file because no pi process
- * is resident. That is enough for the model and the context figure — pi records
- * both on disk — but not for `models`, which only exists inside a running
- * process (null means "not known", not "none configured").
+ * is resident. That is enough for the model, the context figure and the
+ * thinking level — pi records all three on disk — but not for `models`, which
+ * only exists inside a running process (null means "not known", not "none
+ * configured").
  */
 export interface ComposerState {
   live: boolean;
   model: ComposerModel | null;
   models: ComposerModel[] | null;
   context: ComposerContext | null;
+  /** The level in effect; null when nothing has recorded one. */
+  thinkingLevel: string | null;
 }
 
 /** One entry in the server-side directory browser. */
@@ -473,10 +482,31 @@ export type AgentSettings =
 export const FONT_SIZE_MIN = 12;
 export const FONT_SIZE_MAX = 17;
 
-/** A model entry inside a provider. pi only requires `id`. */
+/**
+ * A model entry inside a provider. pi only requires `id`.
+ *
+ * The three optional fields are the ones the model row edits directly, and all
+ * of them mean "say nothing about this" when absent: pi then uses the provider's
+ * own catalog entry for the model, or its built-in defaults.
+ */
 export interface ProviderModelEntry {
   id: string;
   name?: string;
+  /** Tokens the model can hold in one conversation. */
+  contextWindow?: number;
+  /** Tokens the model may generate in one reply. */
+  maxTokens?: number;
+  /** Modalities the model accepts, from pi's `input` union. */
+  input?: string[];
+  /** Whether the model can be asked to think before answering. */
+  reasoning?: boolean;
+  /**
+   * Which of pi's thinking levels this model maps to; `null` disables one. The
+   * editor only ever adds or removes `xhigh` and `max` — the levels below them
+   * exist as soon as `reasoning` is true — so the rest of the map may hold
+   * hand-written entries that must survive a save.
+   */
+  thinkingLevelMap?: Record<string, string | null>;
 }
 
 /**

@@ -1,7 +1,11 @@
 import { useMemo } from "react";
 import { api } from "./api.ts";
 import { resolveLanguage, translator, type Translate, type UiLanguage } from "./i18n/index.ts";
-import { showNotification } from "./notifications.ts";
+import {
+  setNotificationBadge,
+  showNotification,
+  subscribeNotificationClicks,
+} from "./notifications.ts";
 import { buildProjectTree, flattenProjectTree } from "./project-tree.ts";
 import {
   loadSidebarView,
@@ -162,6 +166,14 @@ export interface AppState {
    * a fresh app is in — so this is deliberately not persisted anywhere.
    */
   newSessionModel: ComposerModel | null;
+  /**
+   * The thinking level the next new session starts on, chosen on the hero
+   * before that session exists. Null means "whatever pi starts on"; like
+   * `newSessionModel` it is in-memory only and consumed when the session is
+   * created. It is a bare level string (not a `ComposerModel`) because a level
+   * carries no provider to disambiguate.
+   */
+  newSessionThinkingLevel: string | null;
   /** Projects whose session list is expanded in the sidebar. */
   expandedProjects: Record<string, true>;
   /** Extra session rows revealed per project beyond the default page. */
@@ -232,6 +244,7 @@ const initialState: AppState = {
   pendingUiRequests: [],
   pendingPrompt: null,
   newSessionModel: null,
+  newSessionThinkingLevel: null,
   expandedProjects: {},
   revealedSessions: {},
   sessionQuery: "",
@@ -684,6 +697,7 @@ export const actions = {
       // Same reasoning for the model: the available list is per project, so a
       // choice made in one could name a model the next one cannot reach.
       newSessionModel: null,
+      newSessionThinkingLevel: null,
     }));
     await actions.refreshSessions(projectId);
     // Warm a session while the user is deciding what to do, so the next "+"
@@ -853,6 +867,7 @@ export const actions = {
         // Leaving the new-session flow also drops the model chosen for it: the
         // session it was meant for is not the one being opened.
         newSessionModel: null,
+        newSessionThinkingLevel: null,
         sessionActivity,
       };
     });
@@ -912,6 +927,7 @@ export const actions = {
     initialPrompt?: string,
     images: ImageBlock[] = [],
     model: { provider: string; id: string } | null = null,
+    thinkingLevel: string | null = null,
   ): void {
     const localId = `${DRAFT_PREFIX}${Math.random().toString(36).slice(2, 10)}`;
     appStore.update((state) => ({
@@ -929,15 +945,17 @@ export const actions = {
       // Consumed here: the choice belongs to the session being created, not to
       // whatever the user does after it exists.
       newSessionModel: null,
+      newSessionThinkingLevel: null,
       expandedProjects: { ...state.expandedProjects, [projectId]: true },
     }));
 
     draftRequest = api
-      .createSession(projectId, model)
+      .createSession(projectId, model, thinkingLevel)
       .then((created) => {
         // The session exists either way; a stale model id only costs the
         // choice, so it is reported without abandoning the draft.
         if (created.modelError !== undefined) actions.setNotice(created.modelError);
+        if (created.thinkingError !== undefined) actions.setNotice(created.thinkingError);
         // Queue before swapping the path in: the conversation instance that
         // mounts for the real session consumes it after its history load.
         // A first message can be a screenshot with nothing typed under it, so
@@ -1131,7 +1149,17 @@ export const actions = {
       // Back to pi's own default: the hero is the place the choice is made, so
       // opening it shows what pi would pick rather than the last pick.
       newSessionModel: null,
+      newSessionThinkingLevel: null,
     }));
+  },
+
+  /**
+   * Remember the hero's thinking-level choice. Held in memory only, and consumed
+   * by the next `startDraftSession` — see `newSessionModel` for why it is not
+   * saved.
+   */
+  setNewSessionThinkingLevel(level: string | null): void {
+    appStore.update((state) => ({ ...state, newSessionThinkingLevel: level }));
   },
 
   /**
@@ -1389,3 +1417,29 @@ export const actions = {
     sessionEvents.emit({ sessionPath, event });
   },
 };
+
+/**
+ * The desktop shell's icon badge counts the sessions that finished while the
+ * user was looking elsewhere — the same marks the sidebar shows as "done".
+ *
+ * A store subscription rather than a component effect, because the badge
+ * follows the whole app: opening a session, deleting it, or its process exiting
+ * all clear a mark, and every one of those paths has to move the number. The
+ * activity map is compared by reference so an unrelated state write does not
+ * recount it, and `setNotificationBadge` drops a count that has not moved.
+ */
+let lastActivity: AppState["sessionActivity"] | null = null;
+appStore.subscribe(() => {
+  const activity = appStore.get().sessionActivity;
+  if (activity === lastActivity) return;
+  lastActivity = activity;
+  setNotificationBadge(Object.values(activity).filter((mark) => mark === "done").length);
+});
+
+/**
+ * A click on a shell notification opens the session it announced. The notice is
+ * raised by the main process, so its click arrives here rather than at the call
+ * site — this is the shell's half of what `notifyTaskFinished`'s `onClick` does
+ * in a browser.
+ */
+subscribeNotificationClicks((sessionPath) => actions.selectSession(sessionPath));

@@ -10,17 +10,23 @@
  * would cost 1.5–3.2s (the very latency `readSessionSnapshot` exists to avoid).
  *
  * The disk path is not a guess. A session's model is recorded by pi itself as a
- * `model_change` entry, and the context figure is recomputed with pi's own
- * exported primitives (`estimateTokens`, `calculateContextTokens`,
- * `getLatestCompactionEntry`) following the same rules as
- * `AgentSession.getContextUsage()`. Two things stay genuinely unknown without a
- * process, and are reported as such rather than invented:
+ * `model_change` entry, its thinking level as a `thinking_level_change` entry,
+ * and the context figure is recomputed with pi's own exported primitives
+ * (`estimateTokens`, `calculateContextTokens`, `getLatestCompactionEntry`)
+ * following the same rules as `AgentSession.getContextUsage()`. Two things stay
+ * genuinely unknown without a process, and are reported as such rather than
+ * invented:
  *
  * - **the list of switchable models**, which only exists inside a running pi
  *   (`models: null` — the menu fetches it by asking for a live answer);
  * - **a context window when `models.json` does not declare one**, in which case
  *   there is no percentage to show (pi itself returns `undefined` when
  *   `contextWindow` is 0).
+ *
+ * The thinking levels a model supports are knowable without a process as long
+ * as `models.json` describes that model, because pi derives them from the same
+ * `reasoning`/`thinkingLevelMap` fields the file carries; the list is only
+ * unknown for a model that file does not mention.
  */
 
 import {
@@ -46,6 +52,15 @@ export interface ComposerModel {
   /** 0 when unknown, matching pi's own `contextWindow ?? 0`. */
   contextWindow: number;
   reasoning: boolean;
+  /**
+   * The thinking levels this model can be set to; null means unknown.
+   *
+   * Per model rather than per session because the hero lets the model be chosen
+   * before the session exists: the picker has to describe whatever model is
+   * currently shown, not the one the project defaults to. A single entry
+   * (`["off"]`) is how "this model does not reason" reads.
+   */
+  thinkingLevels: string[] | null;
 }
 
 /** How full the model's context window is. */
@@ -56,6 +71,76 @@ export interface ComposerContext {
   percent: number | null;
 }
 
+/**
+ * pi's thinking levels, weakest to strongest.
+ *
+ * Rebuilt here because pi does not export the list (nor `clampThinkingLevel`)
+ * from the package root — only the running process answers the two questions
+ * this feeds: which levels a model supports, and which one is in effect. The
+ * rule below is pi's own `getSupportedThinkingLevels`, kept in one place so the
+ * disk path and the hero agree with a live session.
+ */
+export const THINKING_LEVELS = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+
+/**
+ * A session's thinking level when nothing has picked one: pi's own default at
+ * the time of writing, used by the hero to show what pi would start on.
+ */
+const DEFAULT_THINKING_LEVEL = "medium";
+
+interface ThinkingFields {
+  reasoning?: boolean;
+  thinkingLevelMap?: Record<string, string | null> | undefined;
+}
+
+/**
+ * Which levels a model can be set to, mirroring pi's `getSupportedThinkingLevels`.
+ *
+ * A model that does not reason has exactly one level (`off`). For a reasoning
+ * model every level is available except an explicitly mapped-to-`null` one, and
+ * `xhigh`/`max` only where the map names them — those two name provider-specific
+ * efforts rather than the shared scale, so a model that does not mention them
+ * does not have them.
+ */
+export function supportedThinkingLevels(model: ThinkingFields): string[] {
+  if (model.reasoning !== true) return ["off"];
+  return THINKING_LEVELS.filter((level) => {
+    const mapped = model.thinkingLevelMap?.[level];
+    if (mapped === null) return false;
+    return level === "xhigh" || level === "max" ? mapped !== undefined : true;
+  });
+}
+
+/**
+ * The nearest supported level to a requested one, mirroring pi's
+ * `clampThinkingLevel`: search stronger first, then weaker, then give up on the
+ * model's weakest level. pi applies this itself on `set_thinking_level`, so the
+ * only caller here is the hero, which shows the level before any process
+ * exists to clamp for it.
+ */
+function clampThinkingLevel(level: string, levels: string[]): string {
+  if (levels.includes(level)) return level;
+  const requested = (THINKING_LEVELS as readonly string[]).indexOf(level);
+  if (requested === -1) return levels[0] ?? "off";
+  for (let i = requested; i < THINKING_LEVELS.length; i += 1) {
+    const candidate = THINKING_LEVELS[i]!;
+    if (levels.includes(candidate)) return candidate;
+  }
+  for (let i = requested - 1; i >= 0; i -= 1) {
+    const candidate = THINKING_LEVELS[i]!;
+    if (levels.includes(candidate)) return candidate;
+  }
+  return levels[0] ?? "off";
+}
+
 export interface ComposerState {
   /** True when this came from a running pi process rather than the JSONL file. */
   live: boolean;
@@ -63,6 +148,15 @@ export interface ComposerState {
   /** null means "no process to ask" — not "no models are configured". */
   models: ComposerModel[] | null;
   context: ComposerContext | null;
+  /**
+   * The level the session runs at, or null when nothing has recorded one.
+   *
+   * pi appends a `thinking_level_change` entry the first time it opens a
+   * session, so a file that has one answers from disk exactly as a live read
+   * would. A file that does not is an unsaved new session, where "nothing has
+   * picked" is the truthful answer rather than pi's would-be default.
+   */
+  thinkingLevel: string | null;
 }
 
 type ConversationMessage = SessionContext["messages"][number];
@@ -75,13 +169,19 @@ interface ModelFields {
   reasoning?: boolean;
 }
 
-function toComposerModel(provider: string, id: string, fields: ModelFields): ComposerModel {
+function toComposerModel(
+  provider: string,
+  id: string,
+  fields: ModelFields,
+  thinkingLevels: string[] | null = null,
+): ComposerModel {
   return {
     provider,
     id,
     name: typeof fields.name === "string" && fields.name.length > 0 ? fields.name : null,
     contextWindow: typeof fields.contextWindow === "number" ? fields.contextWindow : 0,
     reasoning: fields.reasoning === true,
+    thinkingLevels,
   };
 }
 
@@ -176,6 +276,23 @@ function lastModelChange(manager: SessionManager): { provider: string; modelId: 
   return null;
 }
 
+/**
+ * The session's thinking level, as pi recorded it, or null when nothing has.
+ *
+ * Scanned rather than read through `buildSessionContext`, whose default for a
+ * file with no entry is the literal `"off"` — indistinguishable from a user
+ * who really chose off, and the one case where the honest answer is "unknown".
+ */
+function lastThinkingLevel(manager: SessionManager): string | null {
+  const entries = manager.getEntries();
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    const entry = entries[i]!;
+    if (entry.type !== "thinking_level_change") continue;
+    return entry.thinkingLevel;
+  }
+  return null;
+}
+
 /** Composer state read straight from the session file, with no pi process. */
 export async function readComposerFromDisk(
   sessionPath: string,
@@ -191,16 +308,26 @@ export async function readComposerFromDisk(
     // all. Both mean "nothing is chosen", which is the truthful thing for the
     // input bar to show — `SessionManager.open` deliberately opens-or-creates,
     // so this is not an error path.
-    return { live: false, model: null, models: null, context: null };
+    return { live: false, model: null, models: null, context: null, thinkingLevel: null };
   }
 
   const entry = models.get(change.provider)?.get(change.modelId);
-  const model = toComposerModel(change.provider, change.modelId, entry ?? {});
+  // An entry pi's catalog does not know is one we cannot describe — a model from
+  // a built-in provider, say — so the levels stay unknown and the picker asks a
+  // live process rather than guessing "off". A known entry that does not declare
+  // `reasoning` is the normal "no thinking" answer.
+  const model = toComposerModel(
+    change.provider,
+    change.modelId,
+    entry ?? {},
+    entry === undefined ? null : supportedThinkingLevels(entry),
+  );
   return {
     live: false,
     model,
     models: null,
     context: contextUsageFromDisk(manager, model.contextWindow),
+    thinkingLevel: lastThinkingLevel(manager),
   };
 }
 
@@ -215,23 +342,37 @@ export async function readComposerFromClient(
   client: RpcClient,
   catalog?: ModelCatalog,
 ): Promise<ComposerState> {
-  const [state, available, stats] = await Promise.all([
+  const [state, available, stats, thinkingLevels] = await Promise.all([
     client.getState(),
     client.getAvailableModels(),
     client.getSessionStats(),
+    client.getAvailableThinkingLevels(),
   ]);
 
   const current = state.model ?? null;
-  const model = current === null ? null : toComposerModel(current.provider, current.id, current);
+  // `get_available_thinking_levels` answers for the session's model alone, so
+  // the list only carries levels where it is describing that very model; the
+  // others stay unknown rather than borrowing another model's scale.
+  const isCurrent = (provider: string, id: string): boolean =>
+    current !== null && current.provider === provider && current.id === id;
+  const model =
+    current === null
+      ? null
+      : toComposerModel(current.provider, current.id, current, thinkingLevels);
 
   const models = available.map((info: ModelInfo) => {
     // The runtime knows the window; `models.json` knows the display name.
     const entry = catalog?.get(info.provider)?.get(info.id);
-    return toComposerModel(info.provider, info.id, {
-      name: entry?.name,
-      contextWindow: info.contextWindow,
-      reasoning: info.reasoning,
-    });
+    return toComposerModel(
+      info.provider,
+      info.id,
+      {
+        name: entry?.name,
+        contextWindow: info.contextWindow,
+        reasoning: info.reasoning,
+      },
+      isCurrent(info.provider, info.id) ? thinkingLevels : null,
+    );
   });
 
   const usage = stats.contextUsage;
@@ -244,7 +385,7 @@ export async function readComposerFromClient(
           percent: typeof usage.percent === "number" ? usage.percent : null,
         };
 
-  return { live: true, model, models, context };
+  return { live: true, model, models, context, thinkingLevel: state.thinkingLevel };
 }
 
 /**
@@ -266,12 +407,21 @@ export async function readComposerFromClient(
  */
 export async function readComposerFromDefaults(projectPath: string): Promise<ComposerState> {
   const runtime = await sharedModelRuntime();
-  const models = runtime.getAvailableSnapshot().map((entry) =>
-    toComposerModel(entry.provider, entry.id, {
-      name: entry.name,
-      contextWindow: entry.contextWindow,
-      reasoning: entry.reasoning,
-    }),
+  const available = runtime.getAvailableSnapshot();
+  // Every model in this list comes from the runtime's own definition, so its
+  // thinking levels are always derivable here — which is what lets the hero's
+  // picker follow the model the user switches to before any session exists.
+  const models = available.map((entry) =>
+    toComposerModel(
+      entry.provider,
+      entry.id,
+      {
+        name: entry.name,
+        contextWindow: entry.contextWindow,
+        reasoning: entry.reasoning,
+      },
+      supportedThinkingLevels(entry),
+    ),
   );
 
   const settings = SettingsManager.create(projectPath);
@@ -279,10 +429,29 @@ export async function readComposerFromDefaults(projectPath: string): Promise<Com
   const id = settings.getDefaultModel();
   const preferred =
     provider !== undefined && id !== undefined
-      ? models.find((entry) => entry.provider === provider && entry.id === id)
-      : undefined;
+      ? available.findIndex((entry) => entry.provider === provider && entry.id === id)
+      : -1;
+  // The same fallback pi applies when the default is missing or no longer
+  // usable: the first available model.
+  const index = preferred >= 0 ? preferred : available.length > 0 ? 0 : -1;
+  const model = index >= 0 ? models[index] ?? null : null;
+  const thinkingLevels = model?.thinkingLevels ?? null;
 
-  return { live: false, model: preferred ?? models[0] ?? null, models, context: null };
+  // What pi would start a new session on: a per-model override, then the global
+  // default, then pi's own. Clamped here because there is no process yet to do
+  // it — the level is shown, not applied.
+  const requested =
+    index >= 0
+      ? settings.getModelThinkingLevel(available[index]!.provider, available[index]!.id) ??
+        settings.getDefaultThinkingLevel() ??
+        DEFAULT_THINKING_LEVEL
+      : null;
+  const thinkingLevel =
+    thinkingLevels !== null && requested !== null
+      ? clampThinkingLevel(requested, thinkingLevels)
+      : null;
+
+  return { live: false, model, models, context: null, thinkingLevel };
 }
 
 /**
