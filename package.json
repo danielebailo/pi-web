@@ -55,11 +55,22 @@
     "dev:desktop": "pnpm build && pnpm --filter pi-web-simple-desktop run dev",
     "package:desktop": "pnpm --filter pi-web-simple-desktop run package",
     "icons:desktop": "pnpm --filter pi-web-simple-desktop run icons",
-    "typecheck": "pnpm -r run typecheck",
+    "typecheck": "pnpm -r run typecheck && pnpm exec tsc -p tsconfig.extensions.json",
     "test": "pnpm -r run test",
+    "test:ask-user": "pnpm --filter @pi-web-simple/server exec tsx src/testing/ask-user-e2e.mts",
     "prepublishOnly": "pnpm typecheck && pnpm build && pnpm test && node scripts/verify-dist.mjs"
   },
-  "dependencies": {
-    "@earendil-works/pi-coding-agent": "^1.1.0"
+  "//peerDependencies": "宿主提供给扩展的包，pi 只在自己的模块映射里提供它们：见 pi 的 docs/packages.md。放进 dependencies 会让安装副本绕过那层映射、产生重复的类和注册表，pi 启动时会就此报警。",
+  "peerDependencies": {
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "//devDependencies": "上面那些包在仓库里同样被非扩展代码用到（bench/scenario-a-processes.mjs 直接跑 pi 的 RPC，desktop 的打包脚本要找到 pi 的 cli.js），所以本地开发仍要一份真依赖；发布出去的那份由宿主提供。typescript 只为了能对 extensions/ 跑一遍类型检查（它们不归属任何子包）。",
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^1.1.0",
+    "typescript": "^5.7.2"
   }
 }
