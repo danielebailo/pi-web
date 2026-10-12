@@ -10,6 +10,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { EventBus } from "./bus.ts";
 import { resetDefaultComposerCache } from "./composer.ts";
 import { resetSessionOpenCache } from "./session-open.ts";
+import { MINIMAL_SYSTEM_PROMPT } from "./presets.ts";
 import { SessionRegistry } from "./registry.ts";
 import { createRequestHandler } from "./routes.ts";
 import { sessionDirFor } from "./session-path.ts";
@@ -826,8 +827,10 @@ describe("composer api", () => {
       context: null,
       thinkingLevel: null,
       // A file that does not exist carries no promise state, so the session
-      // reads as the composition a caller would have gotten anyway.
+      // reads as the composition a caller would have gotten anyway — and with
+      // no leading system message yet, that composition is still open.
       presetId: "standard",
+      presetLocked: false,
     });
   });
 
@@ -1161,6 +1164,87 @@ describe("slash commands api", () => {
     expect(res.status).toBe(200);
     expect(res.body.commands[0]).toMatchObject({ name: "compact", source: "builtin" });
     expect(res.body.commands.map((command) => command.name)).toContain("skill:pdf-tools");
+  });
+});
+
+describe("session preset api", () => {
+  /**
+   * A session file that already recorded its leading system message.
+   *
+   * That entry is pi's own evidence of a composition *and* of the fact that one
+   * has already been used — the same pair dsh keeps as `agentPreset` plus
+   * `agent-preset-locked`.
+   */
+  async function writeStartedSession(name: string): Promise<string> {
+    const dir = join(sessionRoot, `--${name}--`);
+    await mkdir(dir, { recursive: true });
+    const path = join(dir, "session.jsonl");
+    const header = {
+      type: "session",
+      version: 3,
+      id: "01a04228-2612-7b9a-b6f1-f5c38cc1e726",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      cwd: projectRoot,
+    };
+    const system = {
+      type: "message",
+      id: "s1",
+      parentId: null,
+      timestamp: "2026-01-01T00:00:01.000Z",
+      message: {
+        role: "system",
+        timestamp: 1735689601000,
+        content: "",
+        sections: { preamble: MINIMAL_SYSTEM_PROMPT },
+      },
+    };
+    await writeFile(path, `${JSON.stringify(header)}\n${JSON.stringify(system)}\n`, "utf8");
+    return path;
+  }
+
+  it("recomposes a session that has not started talking", async () => {
+    const project = await createProject("preset-recompose");
+    process.env.STUB_SESSION_FILE = join(sessionRoot, "--preset-recompose--", "session.jsonl");
+    const created = await post("/api/sessions", { projectId: project.id });
+    expect(created.body.presetId).toBe("standard");
+
+    const switched = await post(`/api/sessions/${encodeURIComponent(created.body.sessionPath)}/preset`, {
+      presetId: "minimal",
+    });
+
+    expect(switched.status).toBe(200);
+    expect(switched.body.presetId).toBe("minimal");
+    // Nothing was produced under the old composition, so it is still open.
+    expect(switched.body.presetLocked).toBe(false);
+    // The process really was replaced: its commands are now the minimal set.
+    const commands = await api<{ commands: { name: string }[] }>(
+      `/api/projects/${project.id}/commands?presetId=minimal`,
+    );
+    expect(commands.body.commands.map((command) => command.name)).toContain("web");
+  });
+
+  it("refuses to recompose a session that already has turns", async () => {
+    const sessionPath = await writeStartedSession("preset-locked");
+
+    const res = await post(`/api/sessions/${encodeURIComponent(sessionPath)}/preset`, {
+      presetId: "standard",
+    });
+
+    expect(res.status).toBe(409);
+    // Its own file already answers both questions.
+    const composer = await api<{ presetId: string; presetLocked: boolean }>(
+      `/api/sessions/${encodeURIComponent(sessionPath)}/composer`,
+    );
+    expect(composer.body.presetId).toBe("minimal");
+    expect(composer.body.presetLocked).toBe(true);
+  });
+
+  it("rejects an unknown preset", async () => {
+    const sessionPath = join(sessionRoot, "--preset-unknown--", "session.jsonl");
+    const res = await post(`/api/sessions/${encodeURIComponent(sessionPath)}/preset`, {
+      presetId: "nope",
+    });
+    expect(res.status).toBe(400);
   });
 });
 

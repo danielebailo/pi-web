@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_PRESET_ID, MINIMAL_SYSTEM_PROMPT } from "./presets.ts";
 import { resetSessionOpenCache } from "./session-open.ts";
-import { readSessionPreset } from "./session-preset.ts";
+import { readSessionComposition } from "./session-preset.ts";
 
 const HEADER = {
   type: "session",
@@ -44,13 +44,15 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-describe("readSessionPreset", () => {
+describe("readSessionComposition", () => {
   it("reads the minimal composition out of the leading system message", async () => {
     const path = await writeSession([
       HEADER,
       systemEntry("s1", null, { content: "", sections: { preamble: MINIMAL_SYSTEM_PROMPT } }),
     ]);
-    expect(readSessionPreset(path)).toBe("minimal");
+    // A recorded system message is also the lock: the session has already been
+    // composed once, so the choice is no longer the caller's.
+    expect(readSessionComposition(path)).toEqual({ presetId: "minimal", locked: true });
   });
 
   it("reads a real minimal file, runtime sections and all", async () => {
@@ -65,7 +67,7 @@ describe("readSessionPreset", () => {
         toolsAdded: [{ name: "bash" }],
       }),
     ]);
-    expect(readSessionPreset(path)).toBe("minimal");
+    expect(readSessionComposition(path).presetId).toBe("minimal");
   });
 
   it("accepts the tool list when the file records no prompt sections", async () => {
@@ -73,7 +75,7 @@ describe("readSessionPreset", () => {
       HEADER,
       systemEntry("s1", null, { content: "", toolsAdded: [{ name: "bash" }] }),
     ]);
-    expect(readSessionPreset(path)).toBe("minimal");
+    expect(readSessionComposition(path).presetId).toBe("minimal");
   });
 
   it("treats a full tool set as the default composition", async () => {
@@ -84,17 +86,21 @@ describe("readSessionPreset", () => {
         toolsAdded: [{ name: "read" }, { name: "bash" }, { name: "edit" }, { name: "write" }],
       }),
     ]);
-    expect(readSessionPreset(path)).toBe(DEFAULT_PRESET_ID);
+    expect(readSessionComposition(path).presetId).toBe(DEFAULT_PRESET_ID);
   });
 
-  it("treats a session with no system message as the default", async () => {
+  it("treats a session with no system message as the default, and still open", async () => {
     // A session pi minted but never sent a request for: there is nothing to
-    // reverse, and the default is what a caller would have gotten anyway.
+    // reverse, the default is what a caller would have gotten anyway, and no
+    // turn exists to contradict a different composition.
     const path = await writeSession([HEADER]);
-    expect(readSessionPreset(path)).toBe(DEFAULT_PRESET_ID);
+    expect(readSessionComposition(path)).toEqual({ presetId: DEFAULT_PRESET_ID, locked: false });
   });
 
-  it("treats a missing file as the default", () => {
-    expect(readSessionPreset(join(dir, "absent.jsonl"))).toBe(DEFAULT_PRESET_ID);
+  it("treats a missing file as the default, and still open", () => {
+    expect(readSessionComposition(join(dir, "absent.jsonl"))).toEqual({
+      presetId: DEFAULT_PRESET_ID,
+      locked: false,
+    });
   });
 });

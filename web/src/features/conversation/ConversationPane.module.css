@@ -67,6 +67,74 @@
   white-space: nowrap;
 }
 
+/* The same fact while it can still be changed: the chip becomes a button and
+ * opens the composition list. Same padding and ink, so the header does not
+ * change shape when a session stops being switchable — it stops opening. */
+.headerPresetPicker {
+  position: relative;
+  flex: none;
+}
+
+.headerPresetButton {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 18px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.headerPresetButton:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
+/* Anchored to the chip rather than centred on the screen: the chip is the
+ * question, and the list is its answer. */
+.headerPresetMenu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  padding: 4px;
+  border-radius: 12px;
+  background: var(--dsw-specific-menu);
+  box-shadow: var(--dsw-elevation-float);
+}
+
+.headerPresetItem {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.headerPresetItem:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.headerPresetItemActive {
+  background: var(--dsw-alias-interactive-bg-hover);
+  font-weight: 600;
+}
+
 .spinner {
   width: 11px;
   height: 11px;

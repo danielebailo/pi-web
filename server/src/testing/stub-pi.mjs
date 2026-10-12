@@ -50,7 +50,14 @@ const stubContextUsage = process.env.STUB_CONTEXT_USAGE
  * Payload for `get_commands`. Tests set STUB_COMMANDS to assert on a known
  * list; the default mirrors the three sources pi reports (skill, prompt
  * template, extension command).
+ *
+ * A minimal composition answers differently, and the difference is derived
+ * from the same arguments the registry composes with: `--no-extensions` and
+ * `--no-prompt-templates` leave no skill and no template behind, only whatever
+ * an explicit `--extension` put back. That is what lets the API tests assert a
+ * command listing follows the composition rather than the project.
  */
+const minimalComposition = args.includes("--no-extensions");
 // Session content the stub reports. Tests that need a specific transcript set
 // STUB_SESSION_FILE; everything else gets these empty defaults.
 const stubMessages = [];
@@ -60,15 +67,24 @@ const stubLeafId = null;
 
 const stubCommands = process.env.STUB_COMMANDS
   ? JSON.parse(process.env.STUB_COMMANDS)
-  : [
-      {
-        name: "skill:pdf-tools",
-        description: "Extract text and tables from PDF files",
-        source: "skill",
-        sourceInfo: {},
-      },
-      { name: "review", description: "Review the current diff", source: "prompt", sourceInfo: {} },
-    ];
+  : minimalComposition
+    ? [
+        {
+          name: "web",
+          description: "Start the pi-web-simple web UI",
+          source: "extension",
+          sourceInfo: {},
+        },
+      ]
+    : [
+        {
+          name: "skill:pdf-tools",
+          description: "Extract text and tables from PDF files",
+          source: "skill",
+          sourceInfo: {},
+        },
+        { name: "review", description: "Review the current diff", source: "prompt", sourceInfo: {} },
+      ];
 
 /**
  * Blocking sleep. Deliberately synchronous: the stdin handler below must not

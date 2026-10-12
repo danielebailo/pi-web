@@ -1,10 +1,11 @@
-import { useCallback } from "react";
+import clsx from "clsx";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertIcon, PanelLeftIcon, RefreshIcon } from "../../components/icons.tsx";
 import { Glyph } from "../../components/dsh-icons.tsx";
 import { api } from "../../lib/api.ts";
-import { actions, appStore, isDraftSession, useT } from "../../lib/app-state.ts";
+import { actions, appStore, commandsKey, isDraftSession, useT } from "../../lib/app-state.ts";
 import { useStore } from "../../lib/store.ts";
-import { presetName } from "../../lib/presets.ts";
+import { presetDescription, presetName } from "../../lib/presets.ts";
 import { rightbarActions, rightbarStore } from "../rightbar/rightbar-state.ts";
 import { layoutActions, layoutStore, sidebarGeometry } from "../../layout/layout-state.ts";
 import { publishTurnChanges, type TurnChanges } from "../rightbar/turn-changes-store.ts";
@@ -36,6 +37,90 @@ import styles from "./ConversationPane.module.css";
  * a stats summary live only in that one line.
  */
 const TRANSCRIPT_REPORTED_COMMANDS: ReadonlySet<string> = new Set(["compact"]);
+
+/**
+ * The composition chooser, for a session whose composition is not fixed yet.
+ *
+ * A preset is the arguments pi was started with, so changing it means a new
+ * process; the server allows that only while the session has recorded no leading
+ * system message (see `POST /api/sessions/:id/preset`), which is dsh's
+ * `agent-preset-locked` in pi's own evidence. The same chip becomes a plain
+ * label once that window closes, so the header neither grows nor loses a
+ * control — it just stops opening.
+ */
+function PresetSwitch({
+  current,
+  onSelect,
+}: {
+  current: string;
+  onSelect: (presetId: string) => void;
+}) {
+  const t = useT();
+  const state = useStore(appStore);
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent): void => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent | globalThis.KeyboardEvent): void => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  const presets = state.agentPresets ?? [];
+  // One composition is not a choice, and before the roster lands there is
+  // nothing to switch to either: a chip that can only repeat itself reads as a
+  // control that does nothing.
+  if (presets.length <= 1) return null;
+
+  return (
+    <div className={styles.headerPresetPicker} ref={rootRef}>
+      <button
+        type="button"
+        className={styles.headerPresetButton}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-label={t("preset.choose")}
+        title={t("pane.presetSwitchable")}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span>{presetName(t, current)}</span>
+      </button>
+      {open ? (
+        <div className={styles.headerPresetMenu} role="listbox">
+          {presets.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              role="option"
+              aria-selected={preset.id === current}
+              className={clsx(
+                styles.headerPresetItem,
+                preset.id === current && styles.headerPresetItemActive,
+              )}
+              title={presetDescription(t, preset.id)}
+              onClick={() => {
+                setOpen(false);
+                onSelect(preset.id);
+              }}
+            >
+              <span>{presetName(t, preset.id)}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 export function ConversationPane() {
   const t = useT();
@@ -246,17 +331,23 @@ export function ConversationPane() {
       : t("pane.noSession");
 
   /**
-   * The composition badge, drawn only when it is not the default.
+   * The composition, as a control while that is still possible and a label
+   * after.
    *
-   * "Standard" is what the absence of a badge means, so labelling every session
-   * would be noise. The value is the file's (or the running process's) own
-   * answer, never something set from here: a preset is the arguments pi was
-   * spawned with, and there is no RPC that recomposes a running process — the
-   * same fact dsh spells as a preset being locked once a conversation starts.
+   * A preset is the arguments pi was spawned with, so choosing one normally
+   * belongs to the new-session page. It stays changeable for exactly as long as
+   * the session holds no leading system message — the server's own line, which
+   * is dsh's `agent-preset-locked` measured in pi's evidence. Past that point
+   * the value is a fact about the session, and the badge says so rather than
+   * offering a control the server would refuse.
+   *
+   * "Standard" is what the absence of a badge means, so a locked default session
+   * carries nothing at all.
    */
-  const presetId = composer.state?.presetId;
-  const presetBadge =
-    presetId !== undefined && presetId !== DEFAULT_PRESET_ID ? (
+  const presetLocked = composer.state?.presetLocked ?? true;
+  const presetBadge = !presetLocked ? (
+    <PresetSwitch current={presetId} onSelect={(id) => void composer.selectPreset(id)} />
+  ) : presetId !== DEFAULT_PRESET_ID ? (
       <span className={styles.headerPreset} title={t("pane.presetLocked")}>
         {presetName(t, presetId)}
       </span>

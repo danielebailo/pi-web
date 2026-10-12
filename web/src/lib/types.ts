@@ -340,11 +340,20 @@ export interface ComposerState {
    * Absent on the project read: that one describes a session that does not exist
    * yet, and a preset is only decided when one is created. On a session it rides
    * along with the composer figures because that read is the one request every
-   * switch makes, and the conversation header picks its label from it. A preset
-   * cannot be changed after the process starts — it decided the spawn arguments
-   * — so when it is present it is a fact about the session, never a setting.
+   * switch makes, and the conversation header picks its label from it.
    */
   presetId?: string;
+  /**
+   * Whether that composition is still the caller's to change.
+   *
+   * A preset decided the spawn arguments, so replacing it means a new process —
+   * allowed only while the session has recorded no leading system message, i.e.
+   * while nothing has been produced under the old composition. Once a turn
+   * exists the transcript holds tool calls made under the old tool set, and the
+   * header shows the label as a fact rather than a control. This is dsh's
+   * `agent-preset-locked` line, measured in pi's own evidence.
+   */
+  presetLocked?: boolean;
 }
 
 /** The composition a session runs when the caller named none. */

@@ -6,7 +6,7 @@ import { pipeline } from "node:stream/promises";
 import { SessionManager, type RpcClient } from "@earendil-works/pi-coding-agent";
 import { wantsFrame, type EventBus } from "./bus.ts";
 import { BUILTIN_COMMANDS, runBuiltinCommand } from "./commands.ts";
-import { badRequest, forbidden, HttpError, notFound } from "./errors.ts";
+import { badRequest, conflict, forbidden, HttpError, notFound } from "./errors.ts";
 import type { StaticHandler } from "./static.ts";
 import {
   ExtensionConfigError,
@@ -84,7 +84,7 @@ import { type SessionHandle, type SessionRegistry, type SlashCommand } from "./r
 import { DEFAULT_PRESET_ID, findPreset, listPresets } from "./presets.ts";
 import { deleteSession } from "./session-delete.ts";
 import { openSessionForRead } from "./session-open.ts";
-import { presetIdOfSession, readSessionPreset } from "./session-preset.ts";
+import { presetIdOfSession, readSessionComposition } from "./session-preset.ts";
 import { assertAllowedSessionPath, getSessionRoot, sessionDirFor } from "./session-path.ts";
 import { readSessionSnapshot } from "./session-reader.ts";
 import {
@@ -319,7 +319,7 @@ function optionalPresetId(body: Record<string, unknown>): string {
  * property of the session, not of the input bar, which is why it is merged in
  * by the route rather than produced by `composer.ts`.
  */
-type SessionComposerState = ComposerState & { presetId: string };
+type SessionComposerState = ComposerState & { presetId: string; presetLocked: boolean };
 
 /**
  * The formats a provider will actually decode. The same list the composer
@@ -702,7 +702,15 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
   const liveComposer = async (handle: SessionHandle): Promise<SessionComposerState> => {
     const catalog = await readModelCatalog();
     const state = await callClient(handle, () => readComposerFromClient(handle.client, catalog));
-    return { ...state, presetId: handle.presetId };
+    // The composition comes from the process — it decided the arguments — while
+    // the lock comes from the file. A live session that has not sent a request
+    // yet is still recomposable, and the parse here is the one the switch
+    // already paid for (`session-open.ts`).
+    return {
+      ...state,
+      presetId: handle.presetId,
+      presetLocked: readSessionComposition(handle.sessionPath).locked,
+    };
   };
 
   /**
@@ -714,7 +722,8 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
     const catalog = await readModelCatalog();
     try {
       const state = await readComposerFromDisk(sessionPath, catalog);
-      return { ...state, presetId: readSessionPreset(sessionPath) };
+      const { presetId, locked } = readSessionComposition(sessionPath);
+      return { ...state, presetId, presetLocked: locked };
     } catch (err) {
       throw notFound(`无法读取会话：${(err as Error).message}`);
     }
@@ -1646,6 +1655,46 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
       throw badRequest(`无法设置思考强度为 ${level}：${(err as Error).message}`);
     }
 
+    json(res, 200, await liveComposer(handle));
+  });
+
+  /**
+   * Recompose a session that has not started talking.
+   *
+   * A preset is the arguments pi was started with, so changing it means a new
+   * process rather than a setting — which is why the choice normally lives on
+   * the new-session page. It stays open here for exactly as long as the session
+   * has recorded no leading system message: nothing was produced under the old
+   * composition, so replacing it contradicts no history. Once a turn exists the
+   * transcript holds tool calls made under the old tool set, and the answer is
+   * 409 — the same line dsh draws with `agent-preset-locked`.
+   *
+   * The session keeps its path, its id and its place in the sidebar; only the
+   * process behind it is replaced.
+   */
+  route("POST", "/api/sessions/:id/preset", async ({ res, params, body }) => {
+    const sessionPath = allowedPath(params.id!);
+    const payload = asObject(body);
+    const presetId = requireString(payload, "presetId");
+    if (findPreset(presetId) === null) throw badRequest(`unknown preset: ${presetId}`);
+
+    if (readSessionComposition(sessionPath).locked) {
+      throw conflict("会话已经开始，组成无法更改；请新建一个会话");
+    }
+
+    // The cwd pi needs, from the same parse the lock check just made.
+    let manager: ReturnType<typeof openSessionForRead>;
+    try {
+      manager = openSessionForRead(sessionPath);
+    } catch (err) {
+      throw notFound(`cannot open session: ${(err as Error).message}`);
+    }
+
+    // Close first: `open` hands back the live handle, which keeps the
+    // composition it booted with. The replacement starts from the same file,
+    // so nothing about the session moves but the arguments.
+    await registry.close(sessionPath, "recompose");
+    const handle = await registry.open(manager.getCwd(), sessionPath, presetId);
     json(res, 200, await liveComposer(handle));
   });
 

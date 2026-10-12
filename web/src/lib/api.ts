@@ -562,6 +562,21 @@ export const api = {
       body: JSON.stringify({ level }),
     }),
 
+  /**
+   * Recompose a session that has not started talking.
+   *
+   * A preset is the arguments pi was started with, so this replaces the process
+   * rather than a setting — and only while the session has recorded no leading
+   * system message. The server answers 409 once a turn exists (dsh's
+   * `agent-preset-locked`), because the transcript would be holding tool calls
+   * made under a tool set that is no longer there.
+   */
+  recomposeSession: (sessionPath: string, presetId: string) =>
+    request<ComposerState>(`/api/sessions/${sessionId(sessionPath)}/preset`, {
+      method: "POST",
+      body: JSON.stringify({ presetId }),
+    }),
+
   prompt: (sessionPath: string, message: string, images: ImageBlock[] = []) =>
     request<{ ok: true }>(`/api/sessions/${sessionId(sessionPath)}/prompt`, {
       method: "POST",

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { actions, appStore, sessionEvents } from "../../lib/app-state.ts";
 import { api } from "../../lib/api.ts";
 import type { ComposerState } from "../../lib/types.ts";
+import { DEFAULT_PRESET_ID } from "../../lib/types.ts";
 
 /**
  * Where the composer's figures come from.
@@ -39,6 +40,15 @@ export interface ComposerApi {
    * unsupported one is clamped rather than refused.
    */
   selectThinking(level: string): Promise<void>;
+  /**
+   * Recompose a session that has not started talking.
+   *
+   * A preset decided the spawn arguments, so this is not a setting: the server
+   * replaces the process, and only while the session has recorded no leading
+   * system message. On the new-session path there is nothing to replace yet, so
+   * the choice is remembered for `createSession` instead.
+   */
+  selectPreset(presetId: string): Promise<void>;
 }
 
 /**
@@ -234,6 +244,27 @@ export function useComposerState({ sessionPath, projectId }: ComposerSource): Co
       ? { ...overridden, thinkingLevel: newSessionThinkingLevel }
       : overridden;
 
+  const selectPreset = useCallback(
+    async (presetId: string): Promise<void> => {
+      const path = sessionPath;
+      if (path === null) {
+        // Nothing to recompose yet: remember the choice, and `createSession`
+        // hands it to the process it starts. The default is stored as null so
+        // "not chosen" and "chose the default" stay one state.
+        actions.setNewSessionPresetId(presetId === DEFAULT_PRESET_ID ? null : presetId);
+        return;
+      }
+      try {
+        // The answer is the recomposed session's own composer state, so the
+        // label, the model figures and the lock all move together in one write.
+        apply(path, await api.recomposeSession(path, presetId));
+      } catch (err) {
+        actions.setNotice((err as Error).message);
+      }
+    },
+    [sessionPath, apply],
+  );
+
   /*
    * Memoised on the three things it is built from, so a render of the caller
    * that changed none of them hands back the same object. Without this, every
@@ -243,8 +274,8 @@ export function useComposerState({ sessionPath, projectId }: ComposerSource): Co
    * length of the round trip.
    */
   const value = useMemo(
-    () => ({ state: shown, modelsLoading, ensureLive, selectModel, selectThinking }),
-    [shown, modelsLoading, ensureLive, selectModel, selectThinking],
+    () => ({ state: shown, modelsLoading, ensureLive, selectModel, selectThinking, selectPreset }),
+    [shown, modelsLoading, ensureLive, selectModel, selectThinking, selectPreset],
   );
 
   return value;
