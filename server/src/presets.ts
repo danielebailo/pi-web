@@ -31,16 +31,33 @@ const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
  * The extension that carries the `/web` command.
  *
  * The minimal preset disables extension discovery outright (`--no-extensions`),
- * which is the only way to drop `todo` and `ask-user` — dsh's minimal roster
- * has neither a todo tool nor a question batch. `/web` is put back explicitly:
- * it is this deployment's own entry point, and dsh keeps its platform shell in
- * the same way (`persistent-shell` survives in `minimal.patch.yml` while
- * everything else is gone).
+ * which is the only way to drop `todo` — dsh's minimal roster has no todo tool
+ * (nor a question batch, which is why `ASK_USER_EXTENSION` is not restored
+ * here either). `/web` is put back explicitly: it is this deployment's own
+ * entry point, and dsh keeps its platform shell in the same way
+ * (`persistent-shell` survives in `minimal.patch.yml` while everything else is
+ * gone).
  *
  * The file is only referenced when it exists, so a checkout with the
  * `extensions/` directory stripped still boots; it just loses `/web`.
  */
 const WEB_EXTENSION = join(PACKAGE_ROOT, "extensions", "index.js");
+
+/**
+ * The extension that carries `ask_user_question`.
+ *
+ * Deliberately *not* in the package's `pi.extensions` manifest: the tool's
+ * batch format is something only this deployment's client decodes, so a
+ * terminal session has nothing to gain from registering it — the most it could
+ * do is split the batch into a series of native dialogs. Leaving it out of the
+ * manifest keeps the tool and its guidelines out of every pi session on the
+ * machine; the RPC processes below are the only ones handed the file, and they
+ * are handed it explicitly.
+ *
+ * Guarded like `/web`: pi treats an explicit path it cannot load as a startup
+ * error, and losing the question tool beats losing the session.
+ */
+const ASK_USER_EXTENSION = join(PACKAGE_ROOT, "extensions", "ask-user.ts");
 
 /** The preset a session runs when the caller names none. */
 export const DEFAULT_PRESET_ID = "standard";
@@ -135,7 +152,9 @@ export function findPreset(id: string): AgentPreset | null {
  */
 export function presetSpawnArgs(id: string | undefined): string[] {
   const preset = (id === undefined ? null : findPreset(id)) ?? PRESETS[0]!;
-  if (preset.id !== "minimal") return [...preset.args];
+  if (preset.id !== "minimal") {
+    return [...preset.args, ...(existsSync(ASK_USER_EXTENSION) ? ["--extension", ASK_USER_EXTENSION] : [])];
+  }
   // `--extension` is omitted rather than pointed at a missing file: pi treats an
   // explicit path that does not load as a startup error, and losing `/web` is a
   // far better outcome than losing the session.

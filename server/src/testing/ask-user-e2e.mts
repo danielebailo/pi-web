@@ -2,10 +2,11 @@
  * A real end-to-end pass over the question tool.
  *
  * It drives an actual pi process over RPC — loading this repository's
- * `extensions/ask-user.ts` the way a session does — and answers the dialog the
- * way the web client does. Every assertion is about what came back on the wire
- * or what pi recorded, so a green run means the extension, the codec and pi
- * itself agree, not that a stub does.
+ * `extensions/ask-user.ts` the way the web server does, with an explicit
+ * `--extension` (the package manifest does not list the file) — and answers the
+ * dialog the way the web client does. Every assertion is about what came back
+ * on the wire or what pi recorded, so a green run means the extension, the
+ * codec and pi itself agree, not that a stub does.
  *
  * Each scenario is its own pi process, because the extension holds no state and
  * one session's dialog must not leak into the next.
@@ -19,12 +20,15 @@
  * It costs model calls against whatever this machine is configured to use.
  */
 import { mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { getPackageDir, RpcClient } from "@earendil-works/pi-coding-agent";
 import { decodeAskUserBatch, type AskUserQuestion } from "../ask-user-codec.ts";
 
 const ROOT = "/tmp/piws-ask-user-e2e";
 const CLI = join(getPackageDir(), "dist/cli.js");
+/** `server/src/testing/` → the checkout root, where `extensions/` lives. */
+const EXTENSION = join(dirname(fileURLToPath(import.meta.url)), "../../..", "extensions", "ask-user.ts");
 
 let failures = 0;
 
@@ -41,7 +45,7 @@ async function withPi(
   const client = new RpcClient({
     cliPath: CLI,
     cwd: ROOT,
-    args: ["--approve", "--session-dir", `${ROOT}/sessions`],
+    args: ["--extension", EXTENSION, "--approve", "--session-dir", `${ROOT}/sessions`],
   });
   const frames: { id: string; title: string }[] = [];
   let done = false;

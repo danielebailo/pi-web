@@ -30,7 +30,12 @@ const directories = {
   buildResources: join(desktopDir, "resources"),
 };
 const runtimeDir = join(desktopDir, ".desktop-build", "runtime");
-const iconPath = join(desktopDir, "resources", "icon.png");
+/**
+ * 图标也按平台分两份，理由见 `scripts/render-icon.mjs` 的文件注释：macOS 要的
+ * 是 1024 画布里 824×824、四角透明的 squircle，Windows / Linux 要的是满幅方形。
+ */
+const macIconPath = join(desktopDir, "resources", "icon.png");
+const squareIconPath = join(desktopDir, "resources", "icon-square.png");
 
 /**
  * Electron 版本与发行包都直接取本地已经装好的那一份：
@@ -103,7 +108,7 @@ export default {
   mac: {
     target: ["dmg", "zip"],
     category: "public.app-category.developer-tools",
-    icon: iconPath,
+    icon: macIconPath,
     darkModeSupport: true,
     artifactName: MAC_ARTIFACT,
     // 没有签名证书，不发证书，但也不留一份未签名的包——`afterPack` 会做
@@ -113,7 +118,7 @@ export default {
   },
   win: {
     target: ["nsis", "zip"],
-    icon: iconPath,
+    icon: squareIconPath,
     artifactName: WIN_ARTIFACT,
   },
   nsis: {
@@ -125,7 +130,7 @@ export default {
   },
   linux: {
     target: ["AppImage", "deb"],
-    icon: iconPath,
+    icon: squareIconPath,
     category: "Development",
     maintainer: MAINTAINER,
     synopsis: "Local web UI for the pi coding agent",

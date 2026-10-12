@@ -20,13 +20,19 @@ describe("preset roster", () => {
 });
 
 describe("presetSpawnArgs", () => {
-  it("adds nothing for the default preset", () => {
-    expect(presetSpawnArgs(DEFAULT_PRESET_ID)).toEqual([]);
+  it("hands the default preset the question tool the manifest leaves out", () => {
+    // `ask_user_question` is web-only by construction: the package manifest
+    // does not list it, so no terminal session registers it, and the RPC
+    // process this deployment spawns is given the file explicitly instead.
+    const args = presetSpawnArgs(DEFAULT_PRESET_ID);
+    expect(args).toHaveLength(2);
+    expect(args[0]).toBe("--extension");
+    expect(args[1]).toMatch(/extensions[/\\]ask-user\.ts$/);
   });
 
   it("falls back to the default when no usable id was given", () => {
-    expect(presetSpawnArgs("nope")).toEqual([]);
-    expect(presetSpawnArgs(undefined)).toEqual([]);
+    expect(presetSpawnArgs("nope")).toEqual(presetSpawnArgs(DEFAULT_PRESET_ID));
+    expect(presetSpawnArgs(undefined)).toEqual(presetSpawnArgs(DEFAULT_PRESET_ID));
   });
 
   it("composes minimal out of pi's own flags", () => {
@@ -41,10 +47,9 @@ describe("presetSpawnArgs", () => {
   });
 
   it("puts only the /web extension back after discovery is disabled", () => {
-    // `--no-extensions` is what drops the todo and ask-user tools — dsh's
-    // minimal roster has neither. `/web` is the one extension this deployment
-    // keeps, because it is its own entry point, the way dsh keeps its platform
-    // shell while everything else is gone.
+    // `--no-extensions` drops `todo`, which the manifest does list. The
+    // question tool is not in the manifest at all, and the minimal roster keeps
+    // no question batch either — so `/web` is the one extension restored.
     const args = presetSpawnArgs("minimal");
     const restored = args.slice(args.indexOf("--extension") + 1);
     expect(restored).toHaveLength(1);

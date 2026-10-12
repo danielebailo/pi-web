@@ -26,8 +26,8 @@
   ],
   "pi": {
     "extensions": [
-      "./extensions/*.js",
-      "./extensions/*.ts"
+      "./extensions/index.js",
+      "./extensions/todo.ts"
     ],
     "image": "https://raw.githubusercontent.com/woxihejinghao/pi-web/main/docs/images/overview-dark.png"
   },

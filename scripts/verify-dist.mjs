@@ -14,7 +14,10 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 
 const problems = [];
 
-const mustExist = ["bin/pi-web-simple.js", "extensions/index.js", "server/build/index.js", "web/dist/index.html"];
+// `extensions/ask-user.ts` 不在 pi 的包清单里，而是被服务端作为一个 `--extension`
+// 启动参数指向的文件——少发了不会报错，只是每个 Web 会话静默地失去
+// ask_user_question。
+const mustExist = ["bin/pi-web-simple.js", "extensions/index.js", "extensions/ask-user.ts", "server/build/index.js", "web/dist/index.html"];
 for (const p of mustExist) {
   if (!existsSync(p)) problems.push(`缺少 ${p}`);
 }

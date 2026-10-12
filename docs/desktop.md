@@ -115,8 +115,9 @@ pnpm package:desktop     # = 先 pnpm build（前后端），再打当前平台�
 ```sh
 pnpm dev:desktop                                  # 先构建，再用 Electron 窗口跑当前仓库
                                                   # （窗口加载的是 web/dist 构建产物，改完要重新跑）
-pnpm icons:desktop                                # 由 desktop/resources/icon-source.png 生成 icon.png
-                                                  # （缩放 + macOS squircle 裁形；换图标 = 替换源素材后重跑）
+pnpm icons:desktop                                # 由 desktop/resources/icon-source.png 生成两个图标：
+                                                  # icon.png（macOS squircle）+ icon-square.png（Windows/Linux 满幅方形）
+                                                  # （换图标 = 替换源素材后重跑）
 pnpm --filter pi-web-simple-desktop run package:dir    # 只出解包目录，快很多，用来验证
 pnpm --filter pi-web-simple-desktop run package -- --no-build   # 跳过 pnpm build（产物已经构建过）
 ```
@@ -137,10 +138,17 @@ pnpm --filter pi-web-simple-desktop run package -- --no-build   # 跳过 pnpm bu
 不去网上重下一份——版本与开发模式完全一致，也不再受下载超时的影响。
 
 开发模式（`pnpm dev:desktop`）跑的是 `electron .`，住在 Electron 自己的 bundle 里，
-Dock 图标不会自动变成我们的：主进程会把 `desktop/resources/icon.png` 交给
-`app.dock.setIcon`（macOS）并作为 `BrowserWindow` 的 `icon`（Windows/Linux）。
-打包后这两处都不需要——图标已经在 bundle 的 `.icns` / `.ico` 里。所以换图标时
-除了 `pnpm icons:desktop`，不需要额外做“同步开发版图标”的动作。
+Dock 图标不会自动变成我们的：主进程会把 `desktop/resources/icon.png`（macOS）或
+`icon-square.png`（Windows/Linux）交给 `app.dock.setIcon`（macOS）并作为
+`BrowserWindow` 的 `icon`（Windows/Linux）。打包后这两处都不需要——图标已经在
+bundle 的 `.icns` / `.ico` 里。所以换图标时除了 `pnpm icons:desktop`，不需要额外做
+“同步开发版图标”的动作。
+
+图标分两份是因为圆角惯例相反：macOS 期望 1024 画布里 824×824、四角透明的 squircle，
+Windows 与 Linux 期望满幅方形（圆角交给系统或桌面环境）。细节与几何常量都在
+`desktop/scripts/render-icon.mjs` 的文件注释里。网页端（`web/public/pi-mark.png`）
+用的是同一张源素材，但也是**满幅方形**——界面里的圆角由 CSS `border-radius` 按
+尺寸给（侧栏 24px、新会话页 30px、状态行 14px），预裁圆角会被再裁一次。
 
 ## 环境变量与排错
 

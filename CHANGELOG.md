@@ -19,6 +19,8 @@
 
 ### 变更
 
+- **`ask_user_question` 改成只服务 Web，终端会话不再加载它**：它原本和 `todo` 一起由包的 `pi.extensions` 清单自动发现，于是 `pi install npm:pi-web-simple`（或把本仓库列进 `packages`）之后**每个终端会话**也会注册这个工具——工具清单里多一行、系统提示的 Guidelines 段多三条，而它在终端里最好的下落也只是把一批问题拆成一串原生对话框（`ctx.mode === "tui"` 那条分支）。现在清单从两条 glob（`./extensions/*.js` + `./extensions/*.ts`）改成显式列表（`./extensions/index.js` + `./extensions/todo.ts`），问答工具改由 Web 启动的 pi 显式带入：`server/src/presets.ts` 的标准 preset 追加 `--extension <包根>/extensions/ask-user.ts`——和 `/web` 在极简 preset 里的处理是同一条路数，而极简仍然连这份参数也不给（dsh 的极简名单里没有问答）。**扩展文件本身没动**：`rpc` 走编码进 `select` 标题的整批卡片、`tui` 走逐题对话框，后者现在只服务手工 `pi -e extensions/ask-user.ts` 的会话。附带修掉一处一直存在的问题：没把包装进 pi 的 `npx pi-web-simple`，此前 Web 会话里其实根本没有这个工具，现在有了（那条路以前只能靠包清单，而包清单只对已安装的 pi 包生效）。发布闸门也把 `extensions/ask-user.ts` 列进必备产物：它现在是一个启动参数指向的文件，缺了不报错，只是工具静默消失。
+- **品牌 mark 换成 π WEB 字标，桌面图标按平台分开圆角**：素材仍是黑底白字的一张方图（`desktop/resources/icon-source.png`，网页端 `web/public/pi-mark.png` 与它同源）。但两端对圆角的期待相反：macOS 从 Big Sur 起要的是 1024 画布里 824×824、四角透明的 squircle，Windows 与 Linux 要的是满幅方形、圆角交给系统或桌面环境——原来三个平台共用一份裁好圆角的 `icon.png`，在 Windows 上会让图标比同排应用小一圈。现在 `pnpm icons:desktop` 出两份：`icon.png`（macOS）与 `icon-square.png`（Windows/Linux），`electron-builder.config.mjs` 与开发模式的 `electron .` 各按平台取用；网页端那一份始终是满幅方形，界面里的圆角由 CSS `border-radius` 按尺寸给（侧栏 24px、新会话页 30px、状态行 14px），预裁会被再裁一次。
 - **极简模式的说明写全了它的边界**：新建会话页的那句话补上了「扩展命令与提示词模板也不加载（只放回部署自己的 `/web`）」。
 
 ### 文档

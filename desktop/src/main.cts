@@ -92,10 +92,14 @@ interface AppPaths {
   cwd: string;
   preload: string;
   /**
-   * The brand bitmap to hand Electron (`desktop/resources/icon.png`), or null
-   * when there is nothing to hand over. Only unpackaged runs need it: a packaged
-   * app carries its icon in the bundle (`mac`'s `.icns`, `win`'s `.ico`), while
-   * `electron .` would otherwise wear Electron's own icon in the Dock.
+   * The brand bitmap to hand Electron, or null when there is nothing to hand
+   * over. Only unpackaged runs need it: a packaged app carries its icon in the
+   * bundle (`mac`'s `.icns`, `win`'s `.ico`), while `electron .` would otherwise
+   * wear Electron's own icon in the Dock.
+   *
+   * Which file depends on the platform, for the same reason the packaged icons
+   * differ (see `desktop/scripts/render-icon.mjs`): macOS wants the squircle with
+   * its transparent margin, Windows and Linux want the full-bleed square.
    */
   icon: string | null;
 }
@@ -131,7 +135,8 @@ function appPaths(): AppPaths {
   // `electron .` runs out of Electron's own bundle, so the Dock (and the
   // taskbar on Windows/Linux) would show Electron's icon without this. The
   // packaged app never needs it — see the field's comment on `AppPaths`.
-  const icon = join(app.getAppPath(), "resources", "icon.png");
+  const iconName = process.platform === "darwin" ? "icon.png" : "icon-square.png";
+  const icon = join(app.getAppPath(), "resources", iconName);
   return {
     serverEntry: join(repoRoot, "server", "build", "index.js"),
     staticDir: join(repoRoot, "web", "dist"),

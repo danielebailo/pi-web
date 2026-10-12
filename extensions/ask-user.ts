@@ -17,6 +17,14 @@
  *   user a prefixed title would be worse than asking them three times, and the
  *   batch survives either way because the answers are assembled here.
  *
+ * Neither terminal pi sessions nor their tool lists know about this file: it is
+ * deliberately absent from the package's `pi.extensions` manifest, so only the
+ * RPC processes this deployment spawns register the tool, and only because
+ * `server/src/presets.ts` passes the file with `--extension`. The `tui` branch
+ * therefore serves a session that loaded the extension by hand
+ * (`pi -e extensions/ask-user.ts`); it is kept because that is still a better
+ * answer there than a prefixed title.
+ *
  * Nothing is remembered between calls. A caller that wants "the question still
  * waiting for an answer" reads the transcript, which is why `/reload`,
  * compaction and branching keep working without this file owning state.
