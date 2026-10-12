@@ -1,5 +1,6 @@
 /*
- * The right-hand control for both 关于 rows.
+ * The right-hand control for the pi-version row (项目版本 has no control —
+ * just the number, which reuses `.version` below).
  *
  * It wraps rather than squeezing: the version, its status, and two buttons do
  * not fit beside the description on a narrow window, and a wrapped button is

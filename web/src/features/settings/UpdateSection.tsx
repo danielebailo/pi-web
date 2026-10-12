@@ -7,16 +7,17 @@ import { SettingsGroup, SettingsRow } from "./SettingsRow.tsx";
 import styles from "./UpdateSection.module.css";
 
 /**
- * The pi-version notice, at the bottom of 通用设置.
+ * The version notices, at the bottom of 通用设置.
  *
- * One row, because there is one fact to report. **pi itself** is an npm
- * dependency of this server: a newer release moves with the lockfile and takes a
- * server restart, so the row reports the version and offers its command to copy
- * rather than a button that would have to half-do the job.
+ * Two rows, because they are two different facts. **This project** is one
+ * constant the build already knows, so its row just states it. **pi itself** is
+ * an npm dependency of this server: a newer release moves with the lockfile and
+ * takes a server restart, so its row reports the version and offers its command
+ * to copy rather than a button that would have to half-do the job.
  *
- * The check is not run from the browser: the server owns it, and its short cache
- * means visiting the page does not spawn a check. The 检查更新 button is the
- * explicit "ask upstream again".
+ * Only the pi row is checked. The check is not run from the browser: the server
+ * owns it, and its short cache means visiting the page does not spawn a check.
+ * The 检查更新 button is the explicit "ask upstream again".
  */
 export function UpdateSection({ projectPath }: { projectPath: string | null }) {
   const t = useT();
@@ -89,6 +90,18 @@ export function UpdateSection({ projectPath }: { projectPath: string | null }) {
             {checking ? t("settings.updates.checking") : t("settings.updates.check")}
           </button>
         </div>
+      </SettingsRow>
+
+      {/*
+        No status and no button: nothing here can go stale, and the number is
+        the whole answer. Placed after pi's row so the row people come for
+        ("am I behind?") keeps the top line.
+      */}
+      <SettingsRow
+        title={t("settings.updates.appVersion")}
+        description={t("settings.updates.appVersionDescription")}
+      >
+        <span className={styles.version}>{__APP_VERSION__}</span>
       </SettingsRow>
     </SettingsGroup>
   );
