@@ -28,15 +28,16 @@ import { fileURLToPath } from "node:url";
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 /**
- * The extension that carries the `/web` command.
+ * The extension that carries the `/web` command, and the only entry in the
+ * package's `pi.extensions` manifest.
  *
  * The minimal preset disables extension discovery outright (`--no-extensions`),
- * which is the only way to drop `todo` — dsh's minimal roster has no todo tool
- * (nor a question batch, which is why `ASK_USER_EXTENSION` is not restored
- * here either). `/web` is put back explicitly: it is this deployment's own
- * entry point, and dsh keeps its platform shell in the same way
- * (`persistent-shell` survives in `minimal.patch.yml` while everything else is
- * gone).
+ * which drops that one entry and nothing else — every other file under
+ * `extensions/` reaches a session as an explicit argument
+ * (see `SESSION_EXTENSIONS`). `/web` is put back explicitly: it is this
+ * deployment's own entry point, and dsh keeps its platform shell in the same
+ * way (`persistent-shell` survives in `minimal.patch.yml` while everything
+ * else is gone).
  *
  * The file is only referenced when it exists, so a checkout with the
  * `extensions/` directory stripped still boots; it just loses `/web`.
@@ -44,20 +45,36 @@ const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const WEB_EXTENSION = join(PACKAGE_ROOT, "extensions", "index.js");
 
 /**
- * The extension that carries `ask_user_question`.
+ * The tools this deployment loads into the pi processes it spawns.
  *
- * Deliberately *not* in the package's `pi.extensions` manifest: the tool's
- * batch format is something only this deployment's client decodes, so a
- * terminal session has nothing to gain from registering it — the most it could
- * do is split the batch into a series of native dialogs. Leaving it out of the
- * manifest keeps the tool and its guidelines out of every pi session on the
- * machine; the RPC processes below are the only ones handed the file, and they
- * are handed it explicitly.
+ * Neither file is in the package's `pi.extensions` manifest. That manifest is
+ * what turns a `pi install npm:pi-web-simple` (or a `packages` entry) into
+ * tools for *every* session on the machine, and neither tool belongs there:
  *
- * Guarded like `/web`: pi treats an explicit path it cannot load as a startup
- * error, and losing the question tool beats losing the session.
+ * - `ask-user`'s batch format is only decodable by this deployment's client. A
+ *   terminal session could at best unfold one batch into a series of native
+ *   dialogs, and it would pay for that with a tool slot and three
+ *   `promptGuidelines` lines in the system prompt of every unrelated session.
+ * - `todo`'s payload is a whole-list snapshot in `details.todos`, which is the
+ *   shape this deployment's panel and transcript row project. Listed in the
+ *   manifest, its only contribution to a terminal session is one more tool row
+ *   and its prompt snippet.
+ *
+ * The consequence, stated rather than implied: a plain terminal session has no
+ * question tool and no todo tool (pi ships neither) and no `/todos` overlay.
+ * Both files keep the branch that serves a terminal (`ctx.mode === "tui"`) for
+ * a session that loads them by hand — `pi -e extensions/todo.ts`.
+ *
+ * The minimal preset gets neither (see `presetSpawnArgs`): dsh's minimal roster
+ * has no todo tool and no question batch.
+ *
+ * Guarded by the caller, like `/web`: pi treats an explicit path it cannot load
+ * as a startup error, and losing a tool beats losing the session.
  */
-const ASK_USER_EXTENSION = join(PACKAGE_ROOT, "extensions", "ask-user.ts");
+const SESSION_EXTENSIONS: readonly string[] = [
+  join(PACKAGE_ROOT, "extensions", "ask-user.ts"),
+  join(PACKAGE_ROOT, "extensions", "todo.ts"),
+];
 
 /** The preset a session runs when the caller names none. */
 export const DEFAULT_PRESET_ID = "standard";
@@ -153,7 +170,11 @@ export function findPreset(id: string): AgentPreset | null {
 export function presetSpawnArgs(id: string | undefined): string[] {
   const preset = (id === undefined ? null : findPreset(id)) ?? PRESETS[0]!;
   if (preset.id !== "minimal") {
-    return [...preset.args, ...(existsSync(ASK_USER_EXTENSION) ? ["--extension", ASK_USER_EXTENSION] : [])];
+    const loaded: string[] = [];
+    for (const file of SESSION_EXTENSIONS) {
+      if (existsSync(file)) loaded.push("--extension", file);
+    }
+    return [...preset.args, ...loaded];
   }
   // `--extension` is omitted rather than pointed at a missing file: pi treats an
   // explicit path that does not load as a startup error, and losing `/web` is a

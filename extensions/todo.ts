@@ -15,6 +15,15 @@
  * The tool keeps the name `todo` rather than dsh's `todo_write`: the web UI
  * dispatches its task row on `todo`, and older sessions carry `todo` results
  * from the extension this one replaces — two names would split one list in two.
+ *
+ * Web-only, like `ask-user.ts`: this file is deliberately absent from the
+ * package's `pi.extensions` manifest — which lists only `/web` — so a terminal
+ * session registers neither the tool nor the `/todos` command. The RPC
+ * processes this deployment spawns are handed the file explicitly
+ * (`--extension`, see `server/src/presets.ts`). The TUI rendering below
+ * therefore serves a session that loaded the extension by hand
+ * (`pi -e extensions/todo.ts`), and it is kept because that is still a better
+ * answer there than no list at all — pi ships no todo tool of its own.
  */
 
 import { StringEnum } from "@earendil-works/pi-ai";
