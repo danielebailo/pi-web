@@ -1,0 +1,250 @@
+/*
+ * Only what the batched card adds to the single-question card: the per-question
+ * heading, the multi-select mark, the option description line, and the pager.
+ * Everything the two share — the seat metrics, the card shell, the option rows,
+ * the answer field, the footer — is imported from `QuestionCard.module.css`, so
+ * the two presentations stay one surface instead of drifting apart.
+ */
+
+.questionHead {
+  margin: 4px 6px 0;
+}
+
+.questionHeadTitle {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.questionText {
+  color: var(--dsw-alias-label-primary);
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.multiHint {
+  margin-top: 2px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+/* The multi-select mark takes the number badge's seat so both lists align. */
+.mark {
+  display: grid;
+  place-items: center;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  border: 1px solid var(--dsw-alias-border-l3);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-overlay);
+  color: var(--dsw-alias-button-primary-fill);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.markChecked {
+  border-color: var(--dsw-alias-button-primary-fill);
+}
+
+/* A wrapped description owns its own line rather than trailing the label. */
+.optionDescription {
+  flex-basis: 100%;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
+.otherLabel {
+  margin: 8px 8px 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+/*
+ * Inside a strip the card keeps its own padding off: the strip already inset it
+ * from the column, and stacking both makes the card look narrower than the
+ * strip it belongs to.
+ */
+.embeddedWrap {
+  padding: 0;
+}
+
+.progress {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+/*
+ * The plan-review decision. It replaces the option list rather than sitting
+ * above it: the plan is the question, and a list of two labels under a document
+ * makes the verdict the smallest thing on the card.
+ */
+.planCard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 6px 0;
+}
+
+.planStrip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* dsh's warning dot: the strip names a decision that is waiting on the user. */
+.planDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  corner-shape: round;
+  background: var(--dsw-alias-state-warn-primary);
+}
+
+.planStripLabel {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.planLink {
+  margin-left: auto;
+  padding: 0;
+  color: var(--dsw-alias-link);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.planLink:hover {
+  text-decoration: underline;
+}
+
+.planTitle {
+  color: var(--dsw-alias-label-primary);
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.planSummary {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+/* The expanded plan is the one thing on the card that can be arbitrarily long. */
+.planBody {
+  max-height: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px 10px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-module-platform);
+}
+
+.planActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+/*
+ * The read-back card. No card shell of its own: it is drawn inside the tool
+ * row's own disclosure body, and a second border there would read as a card
+ * inside a card.
+ */
+.reviewCard {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.reviewQuestion {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.reviewOptions {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 2px;
+}
+
+/* The rows are inert — they report a decision, they do not offer one. */
+.reviewOption {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.reviewOptionChosen {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.reviewMark,
+.reviewMarkChosen {
+  display: grid;
+  place-items: center;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  margin-top: 3px;
+  border: 1px solid var(--dsw-alias-border-l3);
+  border-radius: 5px;
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.reviewMarkChosen {
+  border-color: var(--dsw-alias-button-primary-fill);
+  color: var(--dsw-alias-button-primary-fill);
+}
+
+.reviewCustom {
+  margin-top: 2px;
+  padding: 6px 10px;
+  border-left: 2px solid var(--dsw-alias-border-l3);
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  line-height: 20px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.reviewSkipped {
+  margin-top: 2px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.navActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}

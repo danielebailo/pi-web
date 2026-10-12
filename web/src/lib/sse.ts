@@ -116,7 +116,7 @@ export function connectEvents(): () => void {
       if (request.method === "notify") {
         const text = typeof request.message === "string" ? request.message : "";
         if (text.length > 0) actions.setNotice(text);
-      } else if (["confirm", "select", "input", "editor"].includes(request.method)) {
+      } else if (["confirm", "select", "input", "editor", "ask_user"].includes(request.method)) {
         actions.enqueueUiRequest({ sessionPath: data.sessionPath, request });
       }
     }

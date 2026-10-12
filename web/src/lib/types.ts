@@ -93,8 +93,19 @@ export interface ToolCallBlock {
 
 export interface ImageBlock {
   type: "image";
-  data: string;
+  /**
+   * Bare base64, no `data:` prefix — pi's own shape. Absent when the block came
+   * back addressed by URL instead (a tool result's picture, see `url`).
+   */
+  data?: string;
   mimeType: string;
+  /**
+   * Where a non-inline image is fetched from, or absent for one that carries its
+   * bytes. The server hands tool-result pictures out this way so a switch does
+   * not ship every screenshot of a session at once; user messages keep `data`,
+   * because a retry re-sends them as base64.
+   */
+  url?: string;
 }
 
 export type ContentBlock =
@@ -149,11 +160,28 @@ export interface BashExecutionMessage {
   timestamp: number;
 }
 
+/**
+ * The checkpoint pi puts where a compaction cut the conversation.
+ *
+ * It is a *message*, not an entry, so it arrives with the transcript on both
+ * paths (the RPC session's `messages` and `buildSessionContext()`), and it is
+ * the only record of the compaction the client ever sees: everything pi folded
+ * away is gone from the context, and this summary is what took its place.
+ */
+export interface CompactionSummaryMessage {
+  role: "compactionSummary";
+  summary: string;
+  /** pi's estimate of the context size the summary replaced. */
+  tokensBefore: number;
+  timestamp: number;
+}
+
 export type AgentMessage =
   | UserMessage
   | AssistantMessage
   | ToolResultMessage
   | BashExecutionMessage
+  | CompactionSummaryMessage
   | { role: string; [key: string]: unknown };
 
 /** Streaming deltas inside `message_update`. There is no cumulative snapshot:
@@ -170,6 +198,57 @@ export type AssistantStreamEvent =
   | { type: "toolcall_end"; contentIndex: number; toolCall: ToolCallBlock }
   | { type: string; contentIndex?: number; [key: string]: unknown };
 
+/** One selectable answer inside a batched question. */
+export interface AskUserQuestionOption {
+  label: string;
+  /** Extra context shown under the label; never part of the answer. */
+  description?: string;
+}
+
+/**
+ * A caller-declared presentation intent.
+ *
+ * It says the question *is* a known kind of decision, so a client that
+ * recognises the tag may present it as such. An intent changes presentation
+ * only: the answer is the same option label a generic card would send.
+ */
+export interface AskUserQuestionIntent {
+  kind: "plan-review";
+  /** The option label that approves the plan; every other label declines it. */
+  approve: string;
+}
+
+/**
+ * One question of a batched request.
+ *
+ * The server decodes this out of the `select` an extension sent — see
+ * `server/src/ask-user-codec.ts` — so a web client sees the batch itself and
+ * never the encoding it travelled in.
+ */
+export interface AskUserQuestionItem {
+  id: string;
+  question: string;
+  /** Short heading, used as the tab label and the card title. */
+  header?: string;
+  /** Supporting detail, rendered as markdown under the question. */
+  detail?: string;
+  /** Choices to render; absent or empty asks for a free-text answer. */
+  options?: AskUserQuestionOption[];
+  /** Whether more than one label may be selected. */
+  multiSelect?: boolean;
+  /** Presentation hint a capable client may honour. */
+  intent?: AskUserQuestionIntent;
+}
+
+/** One answered question, as the extension receives it back. */
+export interface AskUserQuestionAnswerItem {
+  id: string;
+  /** Selected labels; empty for a skipped or free-text-only answer. */
+  selected: string[];
+  /** Free-text answer, kept alongside `selected` for a multi-select question. */
+  custom?: string;
+}
+
 export interface ExtensionUiRequest {
   type: "extension_ui_request";
   id: string;
@@ -180,6 +259,8 @@ export interface ExtensionUiRequest {
   placeholder?: string;
   text?: string;
   timeout?: number;
+  /** Present only on a decoded `ask_user` batch. */
+  questions?: AskUserQuestionItem[];
   [key: string]: unknown;
 }
 
@@ -285,6 +366,30 @@ export interface WorkspaceListing {
   path: string;
   entries: WorkspaceEntry[];
   truncated: boolean;
+}
+
+/** One compleable path, as the composer's `@` menu lists it. */
+export interface FileSearchItem {
+  /** Path relative to the project root, always `/`-separated. */
+  path: string;
+  /** The final segment, which is what the menu shows as the name. */
+  name: string;
+  type: "directory" | "file";
+}
+
+/** What one `@` query found in a project. */
+export interface FileSearchResult {
+  /** The query this answers, so a late response can be matched to its keystroke. */
+  query: string;
+  items: FileSearchItem[];
+  /** True when more entries matched than the limit allowed. */
+  truncated: boolean;
+  /**
+   * Entries the project's index holds, matched or not. `0` means the project
+   * has nothing to complete from, which is a different message from "your query
+   * matched nothing".
+   */
+  indexed: number;
 }
 
 /**

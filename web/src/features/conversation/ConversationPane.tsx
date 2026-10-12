@@ -12,6 +12,9 @@ import { shortcutTitle } from "../rightbar/shortcuts.ts";
 import type { ImageBlock } from "../../lib/types.ts";
 import { Composer } from "./Composer.tsx";
 import { QuestionCard } from "./QuestionCard.tsx";
+import { QuestionComposer } from "./QuestionComposer.tsx";
+import { PendingQuestions } from "./PendingQuestions.tsx";
+import { askUserQuestions } from "./question-model.ts";
 import { SessionStats } from "./SessionStats.tsx";
 import { MessageList } from "./MessageList.tsx";
 import { NewSessionHero } from "./NewSessionHero.tsx";
@@ -20,6 +23,18 @@ import { TodoPanel } from "./TodoPanel.tsx";
 import { useComposerState } from "./useComposerState.ts";
 import { useConversation } from "./useConversation.ts";
 import styles from "./ConversationPane.module.css";
+
+/**
+ * Built-in commands whose outcome the transcript already reports.
+ *
+ * `/compact` is the only one, and the reason is positional: running it lands a
+ * checkpoint row in the conversation at the point the cut was made (see
+ * `useConversation`). Toasting the same news a moment later — a different
+ * number, in a different corner of the screen — reads as a second event. Every
+ * other built-in has nothing else to show for itself: an export path, a rename,
+ * a stats summary live only in that one line.
+ */
+const TRANSCRIPT_REPORTED_COMMANDS: ReadonlySet<string> = new Set(["compact"]);
 
 export function ConversationPane() {
   const t = useT();
@@ -81,12 +96,18 @@ export function ConversationPane() {
         if (!target) return false;
         try {
           const result = await api.runBuiltinCommand(target, builtin.command.name, builtin.args);
-          actions.setNotice(result.message);
+          if (!TRANSCRIPT_REPORTED_COMMANDS.has(builtin.command.name)) {
+            actions.setNotice(result.message);
+          }
         } catch (err) {
+          // A failure has no row to land in, so it still speaks up.
           actions.setNotice(`/${builtin.command.name}：${(err as Error).message}`);
         }
-        // Compaction and renames change what the transcript reports.
-        await conversation.reload();
+        // No reload: `/compact` lands its checkpoint through the event stream,
+        // at the point it was made (see `useConversation`), and re-reading the
+        // transcript here would replace that with the compacted context — the
+        // folded turns gone and the row pushed up to the very top, which is the
+        // one place the reader is not looking.
         return true;
       }
 
@@ -149,19 +170,44 @@ export function ConversationPane() {
           .flat()
           .find((candidate) => candidate.path === pendingUi.sessionPath)
       : undefined;
+  // A batched question gets the composer that can hold several answers; every
+  // other dialog keeps the single-question card. Both take the composer seat,
+  // so the choice is one branch at the render site and nothing else changes.
   const questionCard = pendingUi ? (
-    <QuestionCard
-      // The request id is the card's identity, and only that: a draft session
-      // swaps its provisional path for the real one a second after the spawn
-      // resolves, and keying on the session path would remount the card and
-      // throw away the row the user had already picked.
-      key={pendingUi.request.id}
-      pending={pendingUi}
-      sessionLabel={pendingSession?.title}
-      onOpenSession={
-        pendingSession ? () => actions.selectSession(pendingUi.sessionPath) : undefined
-      }
-    />
+    pendingUi.request.method === "ask_user" ? (
+      <QuestionComposer
+        // The request id is the card's identity, and only that: a draft session
+        // swaps its provisional path for the real one a second after the spawn
+        // resolves, and keying on the session path would remount the card and
+        // throw away the rows the user had already picked.
+        key={pendingUi.request.id}
+        requestId={pendingUi.request.id}
+        // The server decoded the batch before publishing it (see the ask-user
+        // codec), so this is already the card's own shape.
+        questions={askUserQuestions(pendingUi.request)}
+        title={typeof pendingUi.request.title === "string" ? pendingUi.request.title : undefined}
+        timeoutMs={typeof pendingUi.request.timeout === "number" ? pendingUi.request.timeout : null}
+        draftKey={pendingUi.request.id}
+        sessionLabel={pendingSession?.title}
+        onOpenSession={
+          pendingSession ? () => actions.selectSession(pendingUi.sessionPath) : undefined
+        }
+        onSubmit={async (decision) => {
+          await api.respondToUiRequest(pendingUi.request.id, decision);
+          actions.dismissUiRequest(pendingUi.request.id);
+        }}
+      />
+    ) : (
+      <QuestionCard
+        // Same reason as above: the id is the identity, not the path.
+        key={pendingUi.request.id}
+        pending={pendingUi}
+        sessionLabel={pendingSession?.title}
+        onOpenSession={
+          pendingSession ? () => actions.selectSession(pendingUi.sessionPath) : undefined
+        }
+      />
+    )
   ) : null;
 
   // Nothing open: show the new-session hero instead of a header + empty list.
@@ -246,6 +292,7 @@ export function ConversationPane() {
 
       <MessageList
         view={conversation}
+        sessionPath={sessionPath}
         cwd={project?.path}
         home={state.home}
         transcriptView={state.settings.transcriptDisplay}
@@ -275,6 +322,15 @@ export function ConversationPane() {
       {/* Between transcript and composer, where dsh puts its plan strip: the
           list belongs to the input it is about to steer, not to the history. */}
       <TodoPanel todos={conversation.todos} />
+      {/* A batch whose deadline passed is still answerable, but nothing is
+          blocked behind it — so it waits in a strip above the input instead of
+          taking the seat the live card takes. */}
+      <PendingQuestions
+        questions={conversation.pendingQuestions}
+        onAnswer={async (text) => {
+          await conversation.send(text, "prompt");
+        }}
+      />
       {/* One seat, two occupants: a pending question replaces the input rather
           than stacking above it, so the card cannot be confused for a message
           that has already been sent. */}

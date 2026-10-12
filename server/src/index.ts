@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
+import type { JsonAgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { bus } from "./bus.ts";
 import { OPEN_BROWSER, PORT, SKIP_TITLE_MIGRATION, STATIC_DIR } from "./config.ts";
 import { registry } from "./registry.ts";
@@ -10,14 +11,10 @@ import { migrateLegacySessionTitles } from "./title-migration.ts";
 import { SessionTitleService } from "./title-service.ts";
 import { SessionWatcher } from "./watch.ts";
 import { WorkspaceWatcher } from "./workspace-watch.ts";
-import { pendingUiRequests } from "./ui-requests.ts";
+import { pendingUiRequests, webEventFor, type PiFrame } from "./ui-requests.ts";
 
 // Single bridge from process-level session activity to the browser stream.
-//
-// pi's extensions emit a lot of terminal-only chrome — a single turn produced
-// 53 `setTitle` requests. Those are noise for a browser client, so only the
-// events a web UI can act on are forwarded.
-const UI_METHODS_FOR_WEB = new Set(["notify", "confirm", "select", "input", "editor"]);
+// Which frames survive that bridge is `webEventFor`'s decision, not this file's.
 
 /**
  * Optional model-written titles. It owns no timer and no process: it reacts to
@@ -36,19 +33,20 @@ const titleService = new SessionTitleService({
 
 registry.onEvent((handle, event) => {
   // `extension_ui_request` is part of pi's UI sub-protocol and is not in the
-  // typed agent-event union, so this check goes through a widened view.
-  const raw = event as unknown as { type: string; id?: string; method?: string };
-  if (raw.type === "extension_ui_request") {
-    if (!raw.method || !UI_METHODS_FOR_WEB.has(raw.method)) return;
-    // A dialog blocks its process, and the client answers it by id — so the
-    // request has to be remembered here, not only broadcast. `notify` is
-    // fire-and-forget and owes no answer.
-    if (raw.method !== "notify" && typeof raw.id === "string") {
-      pendingUiRequests.add(handle, raw as unknown as { id: string; method: string });
-    }
-  }
+  // typed agent-event union, so this check goes through a widened view. A
+  // question batch is published in its decoded form (`method: "ask_user"`)
+  // rather than the `select` envelope it travelled in — `webEventFor` owns that
+  // translation, so no client has to know the codec.
+  const published = webEventFor(event as unknown as PiFrame, handle, pendingUiRequests);
+  if (published === null) return;
+  // The title service reads pi's own frames, so it gets the event as it came
+  // off the process and not the display form above.
   titleService.noteEvent(handle, event);
-  bus.publish({ type: "session_event", sessionPath: handle.sessionPath, event });
+  bus.publish({
+    type: "session_event",
+    sessionPath: handle.sessionPath,
+    event: published as unknown as JsonAgentSessionEvent,
+  });
 });
 
 registry.onClosed((handle, reason) => {
