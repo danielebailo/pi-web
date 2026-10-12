@@ -96,6 +96,7 @@ export function sessionStatus(
  */
 export function SessionRow({
   sessionPath,
+  projectId,
   title,
   time,
   active,
@@ -106,6 +107,12 @@ export function SessionRow({
   canDelete = true,
 }: RowProps & {
   sessionPath: string;
+  /**
+   * The workspace this row was drawn under. Handed to `selectSession` so the
+   * header follows the conversation into another workspace; left out by the
+   * flat list, which lets the action look the owner up instead.
+   */
+  projectId?: string;
   title: string;
   time: string;
   active: boolean;
@@ -169,7 +176,7 @@ export function SessionRow({
       <button
         type="button"
         className={styles.sessionTitle}
-        onClick={() => actions.selectSession(sessionPath)}
+        onClick={() => actions.selectSession(sessionPath, projectId)}
       >
         {title}
       </button>
@@ -389,6 +396,7 @@ export function ProjectTreeItem({
             <SessionRow
               key={path}
               sessionPath={path}
+              projectId={project.id}
               title={t("sidebar.newSession")}
               time={isDraftSession(path) ? t("session.preparing") : t("session.unsaved")}
               active={path === selected}
@@ -404,6 +412,7 @@ export function ProjectTreeItem({
             <SessionRow
               key={session.path}
               sessionPath={session.path}
+              projectId={project.id}
               title={session.title}
               time={formatRelativeTime(session.modified, t)}
               active={session.path === selected}

@@ -11,6 +11,7 @@
  * under: the whole list is what this view asks the server for (see
  * `refreshSessions`) and what it draws.
  */
+import { useMemo } from "react";
 import { appStore, isDraftSession, useT } from "../../lib/app-state.ts";
 import { formatRelativeTime } from "../../lib/format.ts";
 import { FLAT_ORDER_KEY } from "../../lib/sidebar-view.ts";
@@ -25,6 +26,22 @@ export function FlatSessionList({ drag }: { drag: SidebarDrag }) {
   const state = useStore(appStore);
   const rows = flatSessionRowsOf(state);
   const selected = state.selectedSessionPath;
+  /**
+   * Which workspace each row belongs to.
+   *
+   * The flat view commends a row without drawing a workspace header over it, so
+   * the owner is not in scope where the row is rendered. It is recovered here —
+   * from the same per-project lists the rows came from — because opening a row
+   * has to switch the selected workspace with it (see `selectSession`).
+   */
+  const ownerOf = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const project of state.projects) {
+      for (const session of state.sessions[project.id] ?? []) map.set(session.path, project.id);
+      for (const path of state.unsavedSessions[project.id] ?? []) map.set(path, project.id);
+    }
+    return map;
+  }, [state.projects, state.sessions, state.unsavedSessions]);
   /** True when this row's session is the one an extension is blocked on. */
   const pendingFor = (path: string): boolean =>
     state.pendingUiRequests.some((item) => item.sessionPath === path);
@@ -39,6 +56,7 @@ export function FlatSessionList({ drag }: { drag: SidebarDrag }) {
         <SessionRow
           key={path}
           sessionPath={path}
+          projectId={ownerOf.get(path)}
           title={t("sidebar.newSession")}
           time={isDraftSession(path) ? t("session.preparing") : t("session.unsaved")}
           active={path === selected}
@@ -54,6 +72,7 @@ export function FlatSessionList({ drag }: { drag: SidebarDrag }) {
         <SessionRow
           key={session.path}
           sessionPath={session.path}
+          projectId={ownerOf.get(session.path)}
           title={session.title}
           time={formatRelativeTime(session.modified, t)}
           active={session.path === selected}
