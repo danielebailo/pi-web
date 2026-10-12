@@ -6,7 +6,10 @@ import {
   FolderOpenIcon,
   SendIcon,
 } from "../../components/icons.tsx";
+import { Glyph } from "../../components/dsh-icons.tsx";
 import { actions, appStore, useT } from "../../lib/app-state.ts";
+import { presetDescription, presetName } from "../../lib/presets.ts";
+import { DEFAULT_PRESET_ID } from "../../lib/types.ts";
 import { isCoarsePointer } from "../../lib/pointer.ts";
 import { PI_MARK_URL } from "../../lib/brand.ts";
 import { useStore } from "../../lib/store.ts";
@@ -97,6 +100,88 @@ function WorkspaceSelect() {
               </button>
             ))
           )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Composition chooser beside the workspace.
+ *
+ * A preset is the arguments pi is started with — the system prompt and the tool
+ * set — so it is only ever a creation-time choice: pi has no RPC to recompose a
+ * running process, which is the same fact dsh spells as its preset being locked
+ * once a session's conversation starts. That is why the chooser is here, on the
+ * hero, and not in settings.
+ */
+function PresetSelect() {
+  const t = useT();
+  const state = useStore(appStore);
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent): void => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent | globalThis.KeyboardEvent): void => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  const presets = state.agentPresets ?? [];
+  // One composition is not a choice, and before the roster lands there is
+  // nothing to switch to either: a chip that can only repeat the default would
+  // read as a control that does nothing.
+  if (presets.length <= 1) return null;
+
+  const selectedId = state.newSessionPresetId ?? DEFAULT_PRESET_ID;
+
+  return (
+    <div className={styles.selector} ref={rootRef}>
+      <button
+        type="button"
+        className={styles.selectorButton}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-label={t("preset.choose")}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <Glyph name="sparkle" size={13} className={styles.selectorFolder} />
+        <span className={styles.selectorLabel}>{presetName(t, selectedId)}</span>
+        <ChevronDownIcon className={styles.selectorCaret} width={12} height={12} />
+      </button>
+      {open ? (
+        <div className={styles.menu} role="listbox">
+          {presets.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              role="option"
+              aria-selected={preset.id === selectedId}
+              className={clsx(
+                styles.menuItem,
+                preset.id === selectedId && styles.menuItemActive,
+              )}
+              title={presetDescription(t, preset.id)}
+              onClick={() => {
+                // The default is stored as null, so "not chosen" and "chose the
+                // default" stay one state rather than two that behave alike.
+                actions.setNewSessionPresetId(preset.id === DEFAULT_PRESET_ID ? null : preset.id);
+                setOpen(false);
+              }}
+            >
+              <span>{presetName(t, preset.id)}</span>
+            </button>
+          ))}
         </div>
       ) : null}
     </div>
@@ -196,6 +281,7 @@ export function NewSessionHero() {
       attachments,
       state.newSessionModel,
       state.newSessionThinkingLevel,
+      state.newSessionPresetId,
     );
   };
 
@@ -239,6 +325,7 @@ export function NewSessionHero() {
 
         <div className={styles.selectors}>
           <WorkspaceSelect />
+          <PresetSelect />
         </div>
 
         <div

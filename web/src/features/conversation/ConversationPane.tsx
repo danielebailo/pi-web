@@ -4,12 +4,13 @@ import { Glyph } from "../../components/dsh-icons.tsx";
 import { api } from "../../lib/api.ts";
 import { actions, appStore, isDraftSession, useT } from "../../lib/app-state.ts";
 import { useStore } from "../../lib/store.ts";
+import { presetName } from "../../lib/presets.ts";
 import { rightbarActions, rightbarStore } from "../rightbar/rightbar-state.ts";
 import { layoutActions, layoutStore, sidebarGeometry } from "../../layout/layout-state.ts";
 import { publishTurnChanges, type TurnChanges } from "../rightbar/turn-changes-store.ts";
 import { PanelRightIcon } from "../rightbar/rightbar-icons.tsx";
 import { shortcutTitle } from "../rightbar/shortcuts.ts";
-import type { ImageBlock } from "../../lib/types.ts";
+import { DEFAULT_PRESET_ID, type ImageBlock } from "../../lib/types.ts";
 import { Composer } from "./Composer.tsx";
 import { QuestionCard } from "./QuestionCard.tsx";
 import { QuestionComposer } from "./QuestionComposer.tsx";
@@ -244,6 +245,23 @@ export function ConversationPane() {
       ? (session?.title ?? t("pane.session"))
       : t("pane.noSession");
 
+  /**
+   * The composition badge, drawn only when it is not the default.
+   *
+   * "Standard" is what the absence of a badge means, so labelling every session
+   * would be noise. The value is the file's (or the running process's) own
+   * answer, never something set from here: a preset is the arguments pi was
+   * spawned with, and there is no RPC that recomposes a running process — the
+   * same fact dsh spells as a preset being locked once a conversation starts.
+   */
+  const presetId = composer.state?.presetId;
+  const presetBadge =
+    presetId !== undefined && presetId !== DEFAULT_PRESET_ID ? (
+      <span className={styles.headerPreset} title={t("pane.presetLocked")}>
+        {presetName(t, presetId)}
+      </span>
+    ) : null;
+
   return (
     <div className={styles.pane}>
       <header className={styles.header} data-window-drag>
@@ -259,6 +277,7 @@ export function ConversationPane() {
         </button>
         <span className={styles.headerTitle}>{project?.title ?? "pi-web-simple"}</span>
         <span className={styles.headerSub}>{headerSub}</span>
+        {presetBadge}
         {draft ? <span className={styles.spinner} aria-hidden /> : null}
         {sessionPath !== null && !draft && !rightbarOpen ? (
           <button

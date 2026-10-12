@@ -52,6 +52,21 @@
   min-width: 0;
 }
 
+/* The composition badge: dsh reports "Minimal mode" in its session banner, and
+ * this is the same fact in the header's own ink. A chip rather than plain text
+ * so it reads as a property of the session rather than as part of its title, and
+ * `flex: none` so a long session name ellipsizes before the badge ever does. */
+.headerPreset {
+  flex: none;
+  padding: 0 6px;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
 .spinner {
   width: 11px;
   height: 11px;

@@ -6,6 +6,7 @@ import {
 import { join, resolve } from "node:path";
 import type { Writable } from "node:stream";
 import { IDLE_TIMEOUT_MS, MAX_ACTIVE_SESSIONS, SESSION_DIR_OVERRIDE } from "./config.ts";
+import { DEFAULT_PRESET_ID, presetSpawnArgs } from "./presets.ts";
 
 /**
  * `RpcClient` spawns `node <cliPath> --mode rpc ...` with `cwd` set to the
@@ -53,6 +54,15 @@ export interface SessionHandle {
   sessionId: string;
   /** Canonical project directory; the spawned process's cwd. */
   projectPath: string;
+  /**
+   * The agent preset this process was composed with.
+   *
+   * Fixed for the handle's life: it decided the spawn arguments, and pi offers
+   * no way to change the tool set or system prompt of a running process. A
+   * session that should run a different preset needs a new process, which means
+   * a new session — see `presets.ts`.
+   */
+  presetId: string;
   client: RpcClient;
   startedAt: number;
   lastActivityAt: number;
@@ -75,7 +85,7 @@ export type SessionClosedListener = (handle: SessionHandle, reason: string) => v
 class SessionRegistry {
   private readonly handles = new Map<string, SessionHandle>();
   private readonly pending = new Map<string, Promise<SessionHandle>>();
-  /** One in-flight prewarm per project path. */
+  /** One in-flight prewarm per project path and preset. */
   private readonly prewarming = new Map<string, Promise<SessionHandle | null>>();
   /** Enumerated slash commands per project path. */
   private readonly commandsCache = new Map<string, { at: number; commands: SlashCommand[] }>();
@@ -111,8 +121,17 @@ class SessionRegistry {
    * reports it through `get_state`, which then becomes the registry key. The
    * file may not exist yet — pi only writes it once an assistant message
    * arrives — but the path is stable for the life of this process.
+   *
+   * `presetId` is what the process gets composed with, and it is the caller's
+   * job to know it: a fresh session takes the user's choice, while an existing
+   * one takes whatever its file says (`session-preset.ts`). Only a fresh spawn
+   * consumes it — an already-live handle keeps the composition it booted with.
    */
-  async open(projectPath: string, sessionPath?: string): Promise<SessionHandle> {
+  async open(
+    projectPath: string,
+    sessionPath?: string,
+    presetId: string = DEFAULT_PRESET_ID,
+  ): Promise<SessionHandle> {
     const requestedKey = sessionPath ? resolve(sessionPath) : undefined;
 
     if (requestedKey) {
@@ -127,7 +146,7 @@ class SessionRegistry {
       if (inflight) return inflight;
     }
 
-    const promise = this.spawn(projectPath, requestedKey, false);
+    const promise = this.spawn(projectPath, requestedKey, false, presetId);
     if (requestedKey) {
       this.pending.set(requestedKey, promise);
       void promise.then(
@@ -145,8 +164,8 @@ class SessionRegistry {
    * effectively instant. Fire-and-forget: failures are swallowed because the
    * on-demand path is still there as a fallback.
    */
-  async prewarm(projectPath: string): Promise<void> {
-    await this.ensurePrewarmed(projectPath);
+  async prewarm(projectPath: string, presetId: string = DEFAULT_PRESET_ID): Promise<void> {
+    await this.ensurePrewarmed(projectPath, presetId);
   }
 
   /**
@@ -158,30 +177,35 @@ class SessionRegistry {
    * The handle stays marked as prewarmed, so it is still available for
    * `claimPrewarmed()` afterwards.
    */
-  async ensurePrewarmed(projectPath: string): Promise<SessionHandle | null> {
-    const warm = this.findPrewarmed(projectPath);
+  async ensurePrewarmed(
+    projectPath: string,
+    presetId: string = DEFAULT_PRESET_ID,
+  ): Promise<SessionHandle | null> {
+    const warm = this.findPrewarmed(projectPath, presetId);
     if (warm) return warm;
 
-    const inflight = this.prewarming.get(projectPath);
+    const key = this.prewarmKey(projectPath, presetId);
+    const inflight = this.prewarming.get(key);
     if (inflight) return inflight;
 
     const promise = (async (): Promise<SessionHandle | null> => {
       // Only one unclaimed prewarm should exist; a stale one for another
-      // project would otherwise linger until the idle sweeper reaches it.
-      await this.dropPrewarmedExcept(projectPath);
+      // project or composition would otherwise linger until the idle sweeper
+      // reaches it.
+      await this.dropPrewarmedExcept(projectPath, presetId);
       try {
-        return await this.spawn(projectPath, undefined, true);
+        return await this.spawn(projectPath, undefined, true, presetId);
       } catch {
         // Prewarming is best-effort; the on-demand path is still available.
         return null;
       }
     })();
 
-    this.prewarming.set(projectPath, promise);
+    this.prewarming.set(key, promise);
     try {
       return await promise;
     } finally {
-      this.prewarming.delete(projectPath);
+      this.prewarming.delete(key);
     }
   }
 
@@ -226,27 +250,43 @@ class SessionRegistry {
    * Take the prewarmed session for a project, promoting it to a real session.
    * Returns null when nothing is warm, in which case the caller spawns.
    */
-  claimPrewarmed(projectPath: string): SessionHandle | null {
-    const handle = this.findPrewarmed(projectPath);
+  claimPrewarmed(projectPath: string, presetId: string = DEFAULT_PRESET_ID): SessionHandle | null {
+    // A prewarm is composed for one preset, and a process cannot be recomposed.
+    // Handing a standard process to a minimal request would silently give the
+    // user the full tool set, so a mismatched prewarm is simply not claimed —
+    // the caller spawns instead, and the warm process stays for the next
+    // standard session.
+    const handle = this.findPrewarmed(projectPath, presetId);
     if (!handle) return null;
     handle.prewarmed = false;
     handle.lastActivityAt = Date.now();
     return handle;
   }
 
-  /** Prewarmed handles still waiting to be claimed. */
-  private findPrewarmed(projectPath: string): SessionHandle | null {
+  /** Prewarmed handles still waiting to be claimed, for one composition. */
+  private findPrewarmed(projectPath: string, presetId: string): SessionHandle | null {
     for (const handle of this.handles.values()) {
-      if (handle.prewarmed && !handle.dead && handle.projectPath === projectPath) {
+      if (
+        handle.prewarmed &&
+        !handle.dead &&
+        handle.projectPath === projectPath &&
+        handle.presetId === presetId
+      ) {
         return handle;
       }
     }
     return null;
   }
 
-  private async dropPrewarmedExcept(projectPath: string): Promise<void> {
+  /** Identity of one prewarm slot: a project paired with a composition. */
+  private prewarmKey(projectPath: string, presetId: string): string {
+    return `${projectPath}\u0000${presetId}`;
+  }
+
+  private async dropPrewarmedExcept(projectPath: string, presetId: string): Promise<void> {
+    const keep = this.prewarmKey(projectPath, presetId);
     for (const handle of [...this.handles.values()]) {
-      if (handle.prewarmed && handle.projectPath !== projectPath) {
+      if (handle.prewarmed && this.prewarmKey(handle.projectPath, handle.presetId) !== keep) {
         await this.close(handle.sessionPath, "prewarm-superseded");
       }
     }
@@ -340,6 +380,7 @@ class SessionRegistry {
     projectPath: string,
     sessionPath?: string,
     prewarmed = false,
+    presetId: string = DEFAULT_PRESET_ID,
   ): Promise<SessionHandle> {
     const client = new RpcClient({
       cliPath: this.cliPath,
@@ -347,6 +388,7 @@ class SessionRegistry {
       args: [
         ...(this.sessionDir ? ["--session-dir", this.sessionDir] : []),
         ...(sessionPath ? ["--session", sessionPath] : []),
+        ...presetSpawnArgs(presetId),
       ],
     });
 
@@ -355,6 +397,7 @@ class SessionRegistry {
       sessionPath: sessionPath ?? "",
       sessionId: "",
       projectPath,
+      presetId,
       client,
       startedAt: Date.now(),
       lastActivityAt: Date.now(),

@@ -70,6 +70,11 @@ describe("open", () => {
     expect(registry.list()).toHaveLength(2);
   });
 
+  it("records the preset a session was composed with", async () => {
+    const handle = await registry.open(projectPath, sessionPathFor("preset"), "minimal");
+    expect(handle.presetId).toBe("minimal");
+  });
+
   it("respawn on open after a handle was marked dead", async () => {
     const path = sessionPathFor("dead");
     const first = await registry.open(projectPath, path);
@@ -194,6 +199,23 @@ describe("prewarm", () => {
 
   it("claims nothing when no prewarm is pending", () => {
     expect(registry.claimPrewarmed(projectPath)).toBeNull();
+  });
+
+  it("keeps a warm process from serving a composition it was not built for", async () => {
+    await registry.prewarm(projectPath, "minimal");
+    // The preset decided the spawn arguments and pi cannot recompose a running
+    // process, so a standard creation has to spawn instead of receiving it.
+    expect(registry.claimPrewarmed(projectPath, "standard")).toBeNull();
+    expect(registry.claimPrewarmed(projectPath, "minimal")?.presetId).toBe("minimal");
+  });
+
+  it("supersedes a warm process built for another composition", async () => {
+    await registry.prewarm(projectPath);
+    await registry.prewarm(projectPath, "minimal");
+    // Still one unclaimed prewarm slot per process pool, as before: the second
+    // call replaces the first rather than adding a second warm process.
+    expect(registry.list().map((handle) => handle.presetId)).toEqual(["minimal"]);
+    expect(registry.claimPrewarmed(projectPath, "standard")).toBeNull();
   });
 
   it("spawns once for concurrent prewarm calls", async () => {

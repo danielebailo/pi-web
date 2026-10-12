@@ -1,5 +1,6 @@
 import type {
   AgentMessage,
+  AgentPresetRow,
   AgentSettings,
   ComposerState,
   DirListing,
@@ -294,11 +295,14 @@ export const api = {
     projectId: string,
     model?: { provider: string; id: string } | null,
     thinkingLevel?: string | null,
+    presetId?: string | null,
   ) =>
     request<{
       sessionPath: string;
       sessionId: string;
       projectPath: string;
+      /** The composition the process was actually started with. */
+      presetId: string;
       prewarmed: boolean;
       /** Set when the hero's model choice could not be applied; the session
        * itself was created either way. */
@@ -311,8 +315,18 @@ export const api = {
         projectId,
         ...(model ? { model } : {}),
         ...(thinkingLevel ? { thinkingLevel } : {}),
+        ...(presetId ? { presetId } : {}),
       }),
     }),
+
+  /**
+   * The compositions a new session can be created with.
+   *
+   * Only identity travels; the label and its sentence are this client's copy,
+   * so one list renders in either language.
+   */
+  listPresets: () =>
+    request<{ presets: AgentPresetRow[] }>("/api/presets").then((body) => body.presets),
 
   /** Best-effort: starts a pi process ahead of the next "new session". */
   prewarmSession: (projectId: string) =>

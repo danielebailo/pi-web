@@ -334,6 +334,29 @@ export interface ComposerState {
   context: ComposerContext | null;
   /** The level in effect; null when nothing has recorded one. */
   thinkingLevel: string | null;
+  /**
+   * The composition this session runs, as its own file records it.
+   *
+   * Absent on the project read: that one describes a session that does not exist
+   * yet, and a preset is only decided when one is created. On a session it rides
+   * along with the composer figures because that read is the one request every
+   * switch makes, and the conversation header picks its label from it. A preset
+   * cannot be changed after the process starts — it decided the spawn arguments
+   * — so when it is present it is a fact about the session, never a setting.
+   */
+  presetId?: string;
+}
+
+/** The composition a session runs when the caller named none. */
+export const DEFAULT_PRESET_ID = "standard";
+
+/** One selectable composition, as `GET /api/presets` reports it. */
+export interface AgentPresetRow {
+  id: string;
+  /** The fixed system prompt, or null when the preset keeps pi's own. */
+  systemPrompt: string | null;
+  /** The tools declared to the model, or null for pi's default selection. */
+  tools: string[] | null;
 }
 
 /** One entry in the server-side directory browser. */

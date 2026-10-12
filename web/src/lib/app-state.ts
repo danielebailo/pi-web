@@ -19,6 +19,7 @@ import {
 import { createEmitter, createStore, useStoreSelector, type Emitter, type Store } from "./store.ts";
 import { applyAppearance, applyContentFontSize, watchSystemAppearance } from "./theme.ts";
 import type {
+  AgentPresetRow,
   AgentSettings,
   ComposerModel,
   ExtensionsView,
@@ -174,6 +175,23 @@ export interface AppState {
    * carries no provider to disambiguate.
    */
   newSessionThinkingLevel: string | null;
+  /**
+   * The composition the next new session runs, chosen on the hero before that
+   * session exists. Null means the default composition.
+   *
+   * In-memory only, like `newSessionModel`, and for a stronger reason: a preset
+   * decides the arguments pi is spawned with, so it can only ever be applied at
+   * creation. Unlike the model there is nothing per project about it, which is
+   * why switching workspaces keeps it.
+   */
+  newSessionPresetId: string | null;
+  /**
+   * The compositions the server offers, or null before the first read lands.
+   *
+   * Only the identity travels from the server; the label is this client's copy,
+   * so nothing here needs a second language to exist server-side.
+   */
+  agentPresets: AgentPresetRow[] | null;
   /** Projects whose session list is expanded in the sidebar. */
   expandedProjects: Record<string, true>;
   /** Extra session rows revealed per project beyond the default page. */
@@ -245,6 +263,8 @@ const initialState: AppState = {
   pendingPrompt: null,
   newSessionModel: null,
   newSessionThinkingLevel: null,
+  newSessionPresetId: null,
+  agentPresets: null,
   expandedProjects: {},
   revealedSessions: {},
   sessionQuery: "",
@@ -393,6 +413,9 @@ export const actions = {
     // Same reasoning: the shell already painted with defaults that match the
     // server's, so preferences reconcile in place instead of gating the view.
     void actions.loadSettings();
+    // Same reasoning again: the hero can render with the default composition,
+    // and learning the rest must not gate first paint.
+    void actions.loadPresets();
     // Fire-and-forget too: this only decides whether the settings entry shows
     // an update dot, and nothing on first paint should wait on the network.
     void actions.loadUpdates(null);
@@ -915,6 +938,7 @@ export const actions = {
         // session it was meant for is not the one being opened.
         newSessionModel: null,
         newSessionThinkingLevel: null,
+        newSessionPresetId: null,
         sessionActivity,
       };
     });
@@ -983,6 +1007,7 @@ export const actions = {
     images: ImageBlock[] = [],
     model: { provider: string; id: string } | null = null,
     thinkingLevel: string | null = null,
+    presetId: string | null = null,
   ): void {
     const localId = `${DRAFT_PREFIX}${Math.random().toString(36).slice(2, 10)}`;
     appStore.update((state) => ({
@@ -1001,11 +1026,12 @@ export const actions = {
       // whatever the user does after it exists.
       newSessionModel: null,
       newSessionThinkingLevel: null,
+      newSessionPresetId: null,
       expandedProjects: { ...state.expandedProjects, [projectId]: true },
     }));
 
     draftRequest = api
-      .createSession(projectId, model, thinkingLevel)
+      .createSession(projectId, model, thinkingLevel, presetId)
       .then((created) => {
         // The session exists either way; a stale model id only costs the
         // choice, so it is reported without abandoning the draft.
@@ -1209,6 +1235,7 @@ export const actions = {
       // opening it shows what pi would pick rather than the last pick.
       newSessionModel: null,
       newSessionThinkingLevel: null,
+      newSessionPresetId: null,
     }));
   },
 
@@ -1219,6 +1246,32 @@ export const actions = {
    */
   setNewSessionThinkingLevel(level: string | null): void {
     appStore.update((state) => ({ ...state, newSessionThinkingLevel: level }));
+  },
+
+  /**
+   * Remember the hero's composition choice. Same lifetime as the thinking level,
+   * and a stronger reason for it: a preset is the spawn arguments, so it cannot
+   * be applied to a session that already exists — there is nothing to persist it
+   * for, only the next creation to consume it.
+   */
+  setNewSessionPresetId(presetId: string | null): void {
+    appStore.update((state) => ({ ...state, newSessionPresetId: presetId }));
+  },
+
+  /**
+   * The compositions the server offers.
+   *
+   * Fire-and-forget on first paint: the hero renders with the default until this
+   * lands, and a failure leaves it offering only that default rather than
+   * putting an error over the composer.
+   */
+  async loadPresets(): Promise<void> {
+    try {
+      const presets = await api.listPresets();
+      appStore.update((state) => ({ ...state, agentPresets: presets }));
+    } catch {
+      // The default composition is always offered; nothing to report.
+    }
   },
 
   /**

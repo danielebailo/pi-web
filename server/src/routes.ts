@@ -81,7 +81,10 @@ import {
   setSessionOverride,
 } from "./projects.ts";
 import { type SessionHandle, type SessionRegistry, type SlashCommand } from "./registry.ts";
+import { DEFAULT_PRESET_ID, findPreset, listPresets } from "./presets.ts";
 import { deleteSession } from "./session-delete.ts";
+import { openSessionForRead } from "./session-open.ts";
+import { presetIdOfSession, readSessionPreset } from "./session-preset.ts";
 import { assertAllowedSessionPath, getSessionRoot, sessionDirFor } from "./session-path.ts";
 import { readSessionSnapshot } from "./session-reader.ts";
 import {
@@ -289,6 +292,34 @@ function optionalThinkingLevel(body: Record<string, unknown>): string | null {
   if (value === undefined || value === null) return null;
   return requireChoice(value, THINKING_LEVELS, "thinkingLevel");
 }
+
+/**
+ * The preset a session is created with, or the default when nothing was picked.
+ *
+ * Unlike the model and the thinking level — both of which pi can be asked to
+ * change while the process runs — this one decided the spawn arguments, so
+ * there is no later moment at which it could be corrected. An unknown id would
+ * create a session that can never be what the caller asked for, which is why it
+ * is a 400 here rather than a failure reported after the fact.
+ */
+function optionalPresetId(body: Record<string, unknown>): string {
+  const value = body.presetId;
+  if (value === undefined || value === null) return DEFAULT_PRESET_ID;
+  if (typeof value !== "string") throw badRequest("presetId must be a string");
+  if (findPreset(value) === null) throw badRequest(`unknown preset: ${value}`);
+  return value;
+}
+
+/**
+ * The composer figures plus the session's composition.
+ *
+ * The preset rides along because the composer read is the one request every
+ * session switch makes, and the conversation header's label needs it — a
+ * separate endpoint would be a second round trip for one string. It is a
+ * property of the session, not of the input bar, which is why it is merged in
+ * by the route rather than produced by `composer.ts`.
+ */
+type SessionComposerState = ComposerState & { presetId: string };
 
 /**
  * The formats a provider will actually decode. The same list the composer
@@ -630,13 +661,17 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
       registry.touch(sessionPath);
       return live;
     }
-    let cwd: string;
+    // One parse answers both questions: the cwd pi needs, and the composition
+    // the file records. Opening a minimal session under the default arguments
+    // would start a process whose prompt and tool set contradict the session's
+    // own leading system message (see `session-preset.ts`).
+    let manager: ReturnType<typeof openSessionForRead>;
     try {
-      cwd = SessionManager.open(sessionPath).getCwd();
+      manager = openSessionForRead(sessionPath);
     } catch (err) {
       throw notFound(`cannot open session: ${(err as Error).message}`);
     }
-    return registry.open(cwd, sessionPath);
+    return registry.open(manager.getCwd(), sessionPath, presetIdOfSession(manager));
   };
 
   /** Any RPC failure marks the handle dead so the next request respawns it. */
@@ -664,20 +699,22 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
    * flight, and the alternative is showing raw model ids where the settings page
    * shows names.
    */
-  const liveComposer = async (handle: SessionHandle): Promise<ComposerState> => {
+  const liveComposer = async (handle: SessionHandle): Promise<SessionComposerState> => {
     const catalog = await readModelCatalog();
-    return await callClient(handle, () => readComposerFromClient(handle.client, catalog));
+    const state = await callClient(handle, () => readComposerFromClient(handle.client, catalog));
+    return { ...state, presetId: handle.presetId };
   };
 
   /**
    * Composer state from the session file, with a missing session reported as
    * 404 and a broken `models.json` left to bubble up as the 400 it is.
    */
-  const diskComposer = async (sessionPath: string): Promise<ComposerState> => {
+  const diskComposer = async (sessionPath: string): Promise<SessionComposerState> => {
     // Read first, so a config error is not misreported as a missing session.
     const catalog = await readModelCatalog();
     try {
-      return await readComposerFromDisk(sessionPath, catalog);
+      const state = await readComposerFromDisk(sessionPath, catalog);
+      return { ...state, presetId: readSessionPreset(sessionPath) };
     } catch (err) {
       throw notFound(`无法读取会话：${(err as Error).message}`);
     }
@@ -1333,6 +1370,25 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
     json(res, 200, await readComposerFromDefaults(project.path));
   });
 
+  // --- agent presets ---------------------------------------------------------
+
+  /**
+   * The compositions a new session can be created with.
+   *
+   * Only identity and the fixed facts travel: the label and the sentence
+   * describing it are the client's, so one list renders in either language
+   * without the server holding copy.
+   */
+  route("GET", "/api/presets", ({ res }) => {
+    json(res, 200, {
+      presets: listPresets().map((preset) => ({
+        id: preset.id,
+        systemPrompt: preset.systemPrompt,
+        tools: preset.tools,
+      })),
+    });
+  });
+
   // --- sessions -------------------------------------------------------------
 
   route("POST", "/api/sessions", async ({ res, body }) => {
@@ -1344,17 +1400,24 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
     const project = await getProject(projectId);
     const model = optionalModel(payload);
     const thinkingLevel = optionalThinkingLevel(payload);
+    const presetId = optionalPresetId(payload);
 
     // A prewarmed process has already paid pi's cold start, so it can be
     // handed over without waiting. Claiming it also frees the slot, so warm
     // the next one immediately to keep back-to-back "new session" instant.
-    const claimed = registry.claimPrewarmed(project.path);
+    //
+    // The claim is per composition: a prewarm is a process that already booted
+    // with one preset's arguments, and pi cannot recompose it. A minimal
+    // creation therefore misses the prewarm and pays its own cold start, while
+    // the warm standard process stays available for the next standard session.
+    const claimed = registry.claimPrewarmed(project.path, presetId);
     if (claimed) {
-      void registry.prewarm(project.path);
+      void registry.prewarm(project.path, presetId);
       json(res, 201, {
         sessionPath: claimed.sessionPath,
         sessionId: claimed.sessionId,
         projectPath: project.path,
+        presetId: claimed.presetId,
         prewarmed: true,
         ...(await applyModel(claimed, model)),
         ...(await applyThinking(claimed, thinkingLevel)),
@@ -1362,11 +1425,12 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
       return;
     }
 
-    const handle = await registry.open(project.path);
+    const handle = await registry.open(project.path, undefined, presetId);
     json(res, 201, {
       sessionPath: handle.sessionPath,
       sessionId: handle.sessionId,
       projectPath: project.path,
+      presetId: handle.presetId,
       prewarmed: false,
       ...(await applyModel(handle, model)),
       ...(await applyThinking(handle, thinkingLevel)),

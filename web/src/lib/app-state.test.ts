@@ -19,6 +19,7 @@ vi.mock("./api.ts", () => ({
     listProjects: vi.fn(),
     listSessions: vi.fn(),
     createSession: vi.fn(),
+    listPresets: vi.fn(),
     prewarmSession: vi.fn(),
     addProject: vi.fn(),
     renameProject: vi.fn(),
@@ -120,7 +121,7 @@ describe("draft sessions", () => {
     actions.startDraftSession("project-1");
     expect(isDraftSession(appStore.get().selectedSessionPath)).toBe(true);
 
-    create.resolve({ sessionPath: REAL_PATH, sessionId: "s1", projectPath: "/home/me/proj", prewarmed: false });
+    create.resolve({ sessionPath: REAL_PATH, sessionId: "s1", projectPath: "/home/me/proj", prewarmed: false, presetId: "standard" });
 
     await vi.waitFor(() => {
       expect(appStore.get().selectedSessionPath).toBe(REAL_PATH);
@@ -136,7 +137,7 @@ describe("draft sessions", () => {
     expect(isDraftSession(draft)).toBe(true);
     expect(appStore.get().unsavedSessions).toEqual({ "project-1": [draft] });
 
-    create.resolve({ sessionPath: REAL_PATH, sessionId: "s1", projectPath: "/home/me/proj", prewarmed: false });
+    create.resolve({ sessionPath: REAL_PATH, sessionId: "s1", projectPath: "/home/me/proj", prewarmed: false, presetId: "standard" });
 
     await vi.waitFor(() => {
       expect(appStore.get().selectedSessionPath).toBe(REAL_PATH);
@@ -153,7 +154,7 @@ describe("draft sessions", () => {
 
     // The user navigates to another conversation while the spawn is in flight.
     actions.selectSession("/home/me/.pi/agent/sessions/proj-abc/other.jsonl");
-    create.resolve({ sessionPath: REAL_PATH, sessionId: "s1", projectPath: "/home/me/proj", prewarmed: false });
+    create.resolve({ sessionPath: REAL_PATH, sessionId: "s1", projectPath: "/home/me/proj", prewarmed: false, presetId: "standard" });
 
     await vi.waitFor(() => {
       expect(appStore.get().unsavedSessions).toEqual({ "project-1": [REAL_PATH] });
@@ -169,6 +170,7 @@ describe("draft sessions", () => {
       sessionId: "s1",
       projectPath: "/home/me/proj",
       prewarmed: false,
+      presetId: "standard",
     });
     actions.startDraftSession("project-1");
     const first = appStore.get().selectedSessionPath!;
@@ -181,7 +183,7 @@ describe("draft sessions", () => {
   it("stops tracking a session once the disk list includes it", async () => {
     const create = deferredCreate();
     actions.startDraftSession("project-1");
-    create.resolve({ sessionPath: REAL_PATH, sessionId: "s1", projectPath: "/home/me/proj", prewarmed: false });
+    create.resolve({ sessionPath: REAL_PATH, sessionId: "s1", projectPath: "/home/me/proj", prewarmed: false, presetId: "standard" });
     await vi.waitFor(() => {
       expect(appStore.get().unsavedSessions).toEqual({ "project-1": [REAL_PATH] });
     });
@@ -208,7 +210,7 @@ describe("draft sessions", () => {
 
     // The user navigates to another conversation while the spawn is in flight.
     actions.selectSession("/home/me/.pi/agent/sessions/proj-abc/other.jsonl");
-    create.resolve({ sessionPath: REAL_PATH, sessionId: "s1", projectPath: "/home/me/proj", prewarmed: false });
+    create.resolve({ sessionPath: REAL_PATH, sessionId: "s1", projectPath: "/home/me/proj", prewarmed: false, presetId: "standard" });
 
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(appStore.get().selectedSessionPath).toBe(
@@ -233,7 +235,7 @@ describe("draft sessions", () => {
   it("resolveDraftSession returns the real path", async () => {
     const create = deferredCreate();
     actions.startDraftSession("project-1");
-    create.resolve({ sessionPath: REAL_PATH, sessionId: "s1", projectPath: "/home/me/proj", prewarmed: false });
+    create.resolve({ sessionPath: REAL_PATH, sessionId: "s1", projectPath: "/home/me/proj", prewarmed: false, presetId: "standard" });
 
     await expect(actions.resolveDraftSession()).resolves.toBe(REAL_PATH);
   });
@@ -1020,9 +1022,9 @@ describe("new session hero", () => {
     expect(isDraftSession(appStore.get().selectedSessionPath)).toBe(true);
     // No model chosen means "start on pi's default", which is not the same
     // request as naming the model pi would have picked anyway.
-    expect(mocked.createSession).toHaveBeenCalledWith("project-1", null, null);
+    expect(mocked.createSession).toHaveBeenCalledWith("project-1", null, null, null);
 
-    create.resolve({ sessionPath: REAL_PATH, sessionId: "s1", projectPath: "/home/me/proj", prewarmed: false });
+    create.resolve({ sessionPath: REAL_PATH, sessionId: "s1", projectPath: "/home/me/proj", prewarmed: false, presetId: "standard" });
 
     await vi.waitFor(() => {
       expect(appStore.get().pendingPrompt?.text).toBe("build me a thing");
@@ -1034,7 +1036,7 @@ describe("new session hero", () => {
   it("does not queue an empty first message", async () => {
     const create = deferredCreate();
     actions.startDraftSession("project-1", "   ");
-    create.resolve({ sessionPath: REAL_PATH, sessionId: "s1", projectPath: "/home/me/proj", prewarmed: false });
+    create.resolve({ sessionPath: REAL_PATH, sessionId: "s1", projectPath: "/home/me/proj", prewarmed: false, presetId: "standard" });
 
     await vi.waitFor(() => {
       expect(appStore.get().selectedSessionPath).toBe(REAL_PATH);
@@ -1051,12 +1053,12 @@ describe("new session hero", () => {
     // what this mirrors.
     actions.startDraftSession("project-1", "hello", [], appStore.get().newSessionModel);
 
-    expect(mocked.createSession).toHaveBeenCalledWith("project-1", picked, null);
+    expect(mocked.createSession).toHaveBeenCalledWith("project-1", picked, null, null);
     // Consumed by the session it was chosen for: the next new session starts
     // from pi's default again.
     expect(appStore.get().newSessionModel).toBeNull();
 
-    create.resolve({ sessionPath: REAL_PATH, sessionId: "s1", projectPath: "/home/me/proj", prewarmed: false });
+    create.resolve({ sessionPath: REAL_PATH, sessionId: "s1", projectPath: "/home/me/proj", prewarmed: false, presetId: "standard" });
     await vi.waitFor(() => {
       expect(appStore.get().selectedSessionPath).toBe(REAL_PATH);
     });
@@ -1070,6 +1072,7 @@ describe("new session hero", () => {
       sessionId: "s1",
       projectPath: "/home/me/proj",
       prewarmed: false,
+      presetId: "standard",
       modelError: "无法切换到 cz/gone：Model not found",
     });
 
@@ -1091,11 +1094,11 @@ describe("new session hero", () => {
       appStore.get().newSessionThinkingLevel,
     );
 
-    expect(mocked.createSession).toHaveBeenCalledWith("project-1", null, "high");
+    expect(mocked.createSession).toHaveBeenCalledWith("project-1", null, "high", null);
     // Consumed by the session it was chosen for, exactly like the model.
     expect(appStore.get().newSessionThinkingLevel).toBeNull();
 
-    create.resolve({ sessionPath: REAL_PATH, sessionId: "s1", projectPath: "/home/me/proj", prewarmed: false });
+    create.resolve({ sessionPath: REAL_PATH, sessionId: "s1", projectPath: "/home/me/proj", prewarmed: false, presetId: "standard" });
     await vi.waitFor(() => {
       expect(appStore.get().selectedSessionPath).toBe(REAL_PATH);
     });
@@ -1109,6 +1112,7 @@ describe("new session hero", () => {
       sessionId: "s1",
       projectPath: "/home/me/proj",
       prewarmed: false,
+      presetId: "standard",
       thinkingError: "无法设置思考强度为 impossible：invalid level",
     });
 
@@ -1116,6 +1120,31 @@ describe("new session hero", () => {
       expect(appStore.get().selectedSessionPath).toBe(REAL_PATH);
     });
     expect(appStore.get().notice).toBe("无法设置思考强度为 impossible：invalid level");
+  });
+
+  it("hands the picked composition to the session being created, once", async () => {
+    const create = deferredCreate();
+    actions.setNewSessionPresetId("minimal");
+
+    actions.startDraftSession(
+      "project-1",
+      "hello",
+      [],
+      null,
+      null,
+      appStore.get().newSessionPresetId,
+    );
+
+    expect(mocked.createSession).toHaveBeenCalledWith("project-1", null, null, "minimal");
+    // Consumed like the model, for a stronger reason: a preset is the arguments
+    // pi is started with, so it can never be applied to a session that already
+    // exists — the next creation is the only thing it can mean.
+    expect(appStore.get().newSessionPresetId).toBeNull();
+
+    create.resolve({ sessionPath: REAL_PATH, sessionId: "s1", projectPath: "/home/me/proj", prewarmed: false, presetId: "minimal" });
+    await vi.waitFor(() => {
+      expect(appStore.get().selectedSessionPath).toBe(REAL_PATH);
+    });
   });
 
   it("drops the picked model when the user leaves the new-session flow", () => {

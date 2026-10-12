@@ -825,6 +825,9 @@ describe("composer api", () => {
       models: null,
       context: null,
       thinkingLevel: null,
+      // A file that does not exist carries no promise state, so the session
+      // reads as the composition a caller would have gotten anyway.
+      presetId: "standard",
     });
   });
 
@@ -962,6 +965,40 @@ describe("composer api", () => {
     const res = await post("/api/sessions", { projectId: project.id, model: { provider: "cz" } });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/model\.id/);
+  });
+
+  it("lists the compositions a new session can be created with", async () => {
+    const res = await api("/api/presets");
+    expect(res.status).toBe(200);
+    expect(res.body.presets.map((preset: { id: string }) => preset.id)).toEqual([
+      "standard",
+      "minimal",
+    ]);
+  });
+
+  it("creates a session with the requested preset and reports it back", async () => {
+    const project = await createProject("hero-preset");
+    const draftFile = join(sessionRoot, "--hero-preset--", "minimal.jsonl");
+    process.env.STUB_SESSION_FILE = draftFile;
+
+    const created = await post("/api/sessions", { projectId: project.id, presetId: "minimal" });
+    expect(created.status).toBe(201);
+    expect(created.body.presetId).toBe("minimal");
+
+    // The composer read is how the conversation header learns the composition,
+    // so it must carry the running process's own answer.
+    const composer = await api(`/api/sessions/${encodeURIComponent(draftFile)}/composer`);
+    expect(composer.body.presetId).toBe("minimal");
+  });
+
+  it("refuses an unknown preset instead of opening a session without it", async () => {
+    const project = await createProject("hero-preset-bad");
+    // A preset decides the spawn arguments and pi cannot recompose a running
+    // process, so a session created under a typo could never become the one the
+    // caller asked for. Refusing is the only honest answer.
+    const res = await post("/api/sessions", { projectId: project.id, presetId: "turbo" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/unknown preset/);
   });
 
   it("switches the model over rpc and answers with the new one", async () => {

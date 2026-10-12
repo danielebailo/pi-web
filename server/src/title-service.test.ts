@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { JsonAgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionHandle } from "./registry.ts";
+import { DEFAULT_PRESET_ID } from "./presets.ts";
 
 let home: string;
 let dir: string;
@@ -105,6 +106,7 @@ function handleFor(sessionPath: string): SessionHandle {
     sessionPath,
     sessionId: "session-1",
     projectPath: dir,
+    presetId: DEFAULT_PRESET_ID,
     client: {} as SessionHandle["client"],
     startedAt: 0,
     lastActivityAt: 0,
