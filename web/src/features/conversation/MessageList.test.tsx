@@ -345,6 +345,56 @@ describe("MessageList streaming message", () => {
     expect(html).not.toContain("想过的东西");
   });
 
+  it("leaves a finished turn's process rows in place under the verbose display", () => {
+    const html = renderToStaticMarkup(
+      <MessageList
+        view={view([
+          { role: "user", content: "跑一下", timestamp: 0 },
+          { role: "assistant", content: [thought("想过的东西")], timestamp: 92_000 },
+        ])}
+        cwd={CWD}
+        home="/Users/dev"
+        transcriptView="verbose"
+      />,
+    );
+
+    // dsh's `foldCompletedTurns` is off here and `stepGrouping: 'none'` folds no
+    // stretch either, so the row itself is what the reader sees and no
+    // completion header stands in for it.
+    expect(html).toContain("想过的东西");
+    expect(html).not.toContain("已完成");
+  });
+
+  it("opens every process row's own body under the verbose display", () => {
+    const transcript = (transcriptView: "detailed" | "verbose") =>
+      renderToStaticMarkup(
+        <MessageList
+          view={view(
+            [
+              asked("跑一下"),
+              answered([
+                { type: "toolCall", id: "c1", name: "bash", arguments: { command: "npm test" } },
+              ]),
+            ],
+            { partial: [thought("思考首行\n思考尾行")], isStreaming: true },
+          )}
+          cwd={CWD}
+          home="/Users/dev"
+          transcriptView={transcriptView}
+        />,
+      );
+
+    // `detailed` already leaves a running turn's rows in place, so the rows are
+    // not what changes here: only `verbose` opens their bodies, which is where
+    // the tool's shell form ("$ npm test") and the reasoning's first line live.
+    // A folded reasoning row shows only its streaming tail ("思考尾行"), so its
+    // first line is the marker that the body itself is on screen.
+    expect(transcript("verbose")).toContain("$ npm test");
+    expect(transcript("verbose")).toContain("思考首行");
+    expect(transcript("detailed")).not.toContain("$ npm test");
+    expect(transcript("detailed")).not.toContain("思考首行");
+  });
+
   it("leaves a streaming turn's rows in place under the detailed display", () => {
     const html = renderToStaticMarkup(
       <MessageList

@@ -20,8 +20,9 @@ export interface TranscriptPolicy {
    */
   stepGrouping: "collapsed" | "history" | "none";
   /**
-   * Whether a live group's title carries the running tool's argument (a
-   * command, a path, a query) — dsh's `liveProcessDetail`.
+   * Whether a live group's title carries the live step's detail — the running
+   * tool's argument (a command, a path, a query) or a reasoning block's
+   * streaming tail — dsh's `liveProcessDetail`.
    */
   liveProcessDetail: boolean;
   /**
@@ -29,6 +30,13 @@ export interface TranscriptPolicy {
    * title (dsh's `settledReasoningPreview`).
    */
   settledReasoningPreview: boolean;
+  /**
+   * Whether every process row opens its own body — the point of the verbose
+   * display, which shows the work itself rather than a title for it. Every
+   * other mode leaves each row folded and lets the reader open the one they
+   * care about.
+   */
+  expandProcessRows: boolean;
 }
 
 const POLICIES: Readonly<Record<TranscriptDisplay, TranscriptPolicy>> = {
@@ -37,24 +45,28 @@ const POLICIES: Readonly<Record<TranscriptDisplay, TranscriptPolicy>> = {
     stepGrouping: "collapsed",
     liveProcessDetail: false,
     settledReasoningPreview: false,
+    expandProcessRows: false,
   },
   standard: {
     foldCompletedTurns: true,
     stepGrouping: "collapsed",
     liveProcessDetail: true,
     settledReasoningPreview: true,
+    expandProcessRows: false,
   },
   detailed: {
     foldCompletedTurns: true,
     stepGrouping: "history",
     liveProcessDetail: true,
     settledReasoningPreview: true,
+    expandProcessRows: false,
   },
   verbose: {
     foldCompletedTurns: false,
     stepGrouping: "none",
     liveProcessDetail: false,
     settledReasoningPreview: true,
+    expandProcessRows: true,
   },
 };
 

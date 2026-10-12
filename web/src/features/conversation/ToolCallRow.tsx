@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Glyph, type GlyphName } from "../../components/dsh-icons.tsx";
 import { StateDot } from "../../components/StateDot.tsx";
 import type { ContentBlock, TextBlock, ToolCallBlock } from "../../lib/types.ts";
 import { DisclosureRow } from "./DisclosureRow.tsx";
+import { useDisclosureOpen } from "./use-disclosure-open.ts";
 import { ImageThumb } from "../../components/ImageLightbox.tsx";
 import { imageBlocksOf } from "../../lib/image-attachments.ts";
 import { classify, deriveSummary, shortenPath, variantTitles, type Variant } from "./row-model.ts";
@@ -60,14 +61,17 @@ export function ToolCallRow({
   execution,
   cwd,
   home,
+  defaultOpen = false,
 }: {
   call: ToolCallBlock;
   execution: ToolExecution | undefined;
   cwd?: string | undefined;
   home?: string | undefined;
+  /** Whether the I/O card starts open — the verbose display opens every row. */
+  defaultOpen?: boolean;
 }) {
   const t = useT();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useDisclosureOpen(defaultOpen);
   const variant = classify(call.name);
   const state = execution?.isError ? "error" : execution?.running ? "running" : "ok";
   const running = execution?.running ?? false;

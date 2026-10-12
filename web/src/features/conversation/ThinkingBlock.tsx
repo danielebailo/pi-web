@@ -1,6 +1,6 @@
-import { useState } from "react";
 import { Glyph } from "../../components/dsh-icons.tsx";
 import { DisclosureRow } from "./DisclosureRow.tsx";
+import { useDisclosureOpen } from "./use-disclosure-open.ts";
 import { firstNonBlankLine, lastNonBlankLine } from "./row-model.ts";
 import styles from "./ThinkingBlock.module.css";
 import { useT } from "../../lib/app-state.ts";
@@ -31,14 +31,17 @@ export function ThinkingBlock({
   text,
   streaming,
   preview = true,
+  defaultOpen = false,
 }: {
   text: string;
   streaming?: boolean;
   /** Whether a settled row may show its one-line summary. */
   preview?: boolean;
+  /** Whether the row's body starts open — the verbose display opens every row. */
+  defaultOpen?: boolean;
 }) {
   const t = useT();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useDisclosureOpen(defaultOpen);
 
   // pi emits empty reasoning blocks — interrupted thinking, or a turn where the
   // model returned none. An empty "思考 ·" row is pure noise, and the same guard

@@ -1,9 +1,9 @@
-import { useState } from "react";
 import { Glyph } from "../../components/dsh-icons.tsx";
 import { useT } from "../../lib/app-state.ts";
 import type { MessageKey } from "../../lib/i18n/index.ts";
 import type { ToolCallBlock } from "../../lib/types.ts";
 import { DisclosureRow } from "./DisclosureRow.tsx";
+import { useDisclosureOpen } from "./use-disclosure-open.ts";
 import { QuestionReviewCard } from "./QuestionReviewCard.tsx";
 import { ToolCallRow } from "./ToolCallRow.tsx";
 import { readSettledQuestion, type QuestionOutcome } from "./pending-questions.ts";
@@ -36,17 +36,30 @@ export function QuestionRow({
   execution,
   cwd,
   home,
+  defaultOpen = false,
 }: {
   call: ToolCallBlock;
   execution: ToolExecution | undefined;
   cwd?: string | undefined;
   home?: string | undefined;
+  /** Whether the answer card starts open — the verbose display opens every row. */
+  defaultOpen?: boolean;
 }) {
   const t = useT();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useDisclosureOpen(defaultOpen);
   const record = readSettledQuestion(execution?.details);
 
-  if (record === null) return <ToolCallRow call={call} execution={execution} cwd={cwd} home={home} />;
+  if (record === null) {
+    return (
+      <ToolCallRow
+        call={call}
+        execution={execution}
+        cwd={cwd}
+        home={home}
+        defaultOpen={defaultOpen}
+      />
+    );
+  }
 
   const summary = `${t(OUTCOME_LABELS[record.outcome])} · ${t("question.pendingCount", {
     count: record.questions.length,

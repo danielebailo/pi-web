@@ -96,6 +96,7 @@ function BlockView({
   results,
   streaming,
   previewSettled,
+  defaultOpen,
   cwd,
   home,
 }: {
@@ -105,6 +106,8 @@ function BlockView({
   streaming: boolean;
   /** Whether a settled reasoning row may carry its one-line summary. */
   previewSettled: boolean;
+  /** Whether a process row's own body starts open — the verbose display. */
+  defaultOpen: boolean;
 } & PathContext) {
   if (block.type === "text") {
     const text = (block as TextBlock).text;
@@ -116,6 +119,7 @@ function BlockView({
         text={(block as ThinkingBlockType).thinking}
         streaming={streaming}
         preview={previewSettled}
+        defaultOpen={defaultOpen}
       />
     );
   }
@@ -138,11 +142,29 @@ function BlockView({
     // `todo` answers with a whole-list snapshot rather than a body of text, so it
     // gets a list instead of the generic parameters-and-output card; a settled
     // question gets its own answer read back as the card it was answered in.
-    if (call.name === "todo") return <TodoRow call={call} execution={execution} />;
-    if (call.name === "ask_user_question") {
-      return <QuestionRow call={call} execution={execution} cwd={cwd} home={home} />;
+    if (call.name === "todo") {
+      return <TodoRow call={call} execution={execution} defaultOpen={defaultOpen} />;
     }
-    return <ToolCallRow call={call} execution={execution} cwd={cwd} home={home} />;
+    if (call.name === "ask_user_question") {
+      return (
+        <QuestionRow
+          call={call}
+          execution={execution}
+          cwd={cwd}
+          home={home}
+          defaultOpen={defaultOpen}
+        />
+      );
+    }
+    return (
+      <ToolCallRow
+        call={call}
+        execution={execution}
+        cwd={cwd}
+        home={home}
+        defaultOpen={defaultOpen}
+      />
+    );
   }
   if (block.type === "image") {
     return <ImageThumb image={block as ImageBlock} />;
@@ -200,6 +222,7 @@ function TurnBody({
   liveProcessDetail,
   processDurationMs,
   previewSettled,
+  expandProcessRows,
   cwd,
   home,
 }: {
@@ -217,12 +240,14 @@ function TurnBody({
   compact: boolean;
   /** dsh's `stepGrouping`: fold a turn's process runs, and for which turns. */
   stepGrouping: TranscriptPolicy["stepGrouping"];
-  /** dsh's `liveProcessDetail`: name the running tool's argument in a live group. */
+  /** dsh's `liveProcessDetail`: name the live step (tool argument or reasoning tail) in a live group. */
   liveProcessDetail: TranscriptPolicy["liveProcessDetail"];
   /** Wall-clock span of this turn, for the group's header. */
   processDurationMs: number | null;
   /** Whether settled reasoning rows may carry their one-line summary. */
   previewSettled: boolean;
+  /** Whether every process row opens its own body — the verbose display. */
+  expandProcessRows: boolean;
 } & PathContext) {
   const t = useT();
   const renderStep = (step: TurnStep) => (
@@ -233,6 +258,7 @@ function TurnBody({
       results={results}
       streaming={streaming && step.tail === true}
       previewSettled={previewSettled}
+      defaultOpen={expandProcessRows}
       cwd={cwd}
       home={home}
     />
@@ -254,9 +280,11 @@ function TurnBody({
     // rather than reporting it as finished while the turn is still in it.
     const open = streaming && index === segments.length - 1;
     const heading = processSegmentTitle(segmentSteps, t, open);
-    // dsh shows the running argument only in the modes that ask for detail, and
+    // dsh shows the live step's detail only in the modes that ask for it, and
     // only while the group is live: a finished group's title summarises what
-    // happened, it is not a snapshot of one call.
+    // happened, it is not a snapshot of one call. The detail is the running
+    // tool's argument or a reasoning block's streaming tail, whichever step the
+    // group is on — matching what its rows show when expanded.
     const detail =
       liveProcessDetail && heading.running && heading.detail !== undefined
         ? `${t("message.stepProcess.separator")}${heading.detail}`
@@ -575,8 +603,13 @@ export function MessageList({
   onRetry?: (text: string, images: ImageBlock[]) => void;
 } & PathContext) {
   const t = useT();
-  const { foldCompletedTurns, stepGrouping, liveProcessDetail, settledReasoningPreview } =
-    transcriptPolicyFor(transcriptView);
+  const {
+    foldCompletedTurns,
+    stepGrouping,
+    liveProcessDetail,
+    settledReasoningPreview,
+    expandProcessRows,
+  } = transcriptPolicyFor(transcriptView);
   const scrollRef = useRef<HTMLDivElement>(null);
   // The message column, watched so that a fold or an image load — anything that
   // resizes the transcript without touching `view.messages` — still puts a
@@ -1174,8 +1207,8 @@ export function MessageList({
                   compact={foldCompletedTurns && !isLiveTurn && failed === null}
                   stepGrouping={stepGrouping}
                   liveProcessDetail={liveProcessDetail}
-                  processDurationMs={turnMeta.get(group.turn)?.durationMs ?? null}
-                  // dsh's `settledReasoningPreview`: the compact mode drops the
+                  expandProcessRows={expandProcessRows}
+                  processDurationMs={turnMeta.get(group.turn)?.durationMs ?? null}                  // dsh's `settledReasoningPreview`: the compact mode drops the
                   // line beside "思考" and leaves the text one click away; every
                   // other mode keeps it.
                   previewSettled={settledReasoningPreview}
@@ -1249,6 +1282,7 @@ export function MessageList({
             compact={foldCompletedTurns && !view.isStreaming}
             stepGrouping={stepGrouping}
             liveProcessDetail={liveProcessDetail}
+            expandProcessRows={expandProcessRows}
             // Nothing to time: this path exists for a stream with no turn to
             // attach to, so there is no start or end stamp anywhere.
             processDurationMs={null}

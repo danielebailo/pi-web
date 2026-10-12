@@ -1,8 +1,8 @@
-import { useState } from "react";
 import { Glyph } from "../../components/dsh-icons.tsx";
 import { StateDot } from "../../components/StateDot.tsx";
 import type { ToolCallBlock } from "../../lib/types.ts";
 import { DisclosureRow } from "./DisclosureRow.tsx";
+import { useDisclosureOpen } from "./use-disclosure-open.ts";
 import { TodoList } from "./TodoList.tsx";
 import {
   parseTodoSnapshot,
@@ -31,12 +31,15 @@ import { useT } from "../../lib/app-state.ts";
 export function TodoRow({
   call,
   execution,
+  defaultOpen = false,
 }: {
   call: ToolCallBlock;
   execution: ToolExecution | undefined;
+  /** Whether the plan panel starts open — the verbose display opens every row. */
+  defaultOpen?: boolean;
 }) {
   const t = useT();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useDisclosureOpen(defaultOpen);
   const state = execution?.isError ? "error" : execution?.running ? "running" : "ok";
   const running = execution?.running ?? false;
 

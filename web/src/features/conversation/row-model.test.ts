@@ -23,6 +23,7 @@ import {
   processSegmentTitle,
   processActivityOf,
   liveToolDetail,
+  liveThinkingDetail,
   type ProcessActivity,
   type Variant,
 } from "./row-model.ts";
@@ -320,6 +321,28 @@ describe("liveToolDetail", () => {
   });
 });
 
+describe("liveThinkingDetail", () => {
+  it("tracks the streaming tail, the line the row itself shows", () => {
+    expect(liveThinkingDetail("先看测试\n再看实现")).toBe("再看实现");
+    expect(liveThinkingDetail("\n\n只有一行\n\n")).toBe("只有一行");
+  });
+
+  it("drops the bold markers the row strips too", () => {
+    expect(liveThinkingDetail("**Step one**\nplain tail")).toBe("plain tail");
+  });
+
+  it("returns nothing for a reasoning block with no content", () => {
+    expect(liveThinkingDetail("")).toBe("");
+    expect(liveThinkingDetail("   \n\n  ")).toBe("");
+  });
+
+  it("caps a pasted block so a title stays one line", () => {
+    const detail = liveThinkingDetail("x".repeat(500));
+    expect([...detail]).toHaveLength(160);
+    expect(detail.endsWith("…")).toBe(true);
+  });
+});
+
 describe("processTitle", () => {
   it("joins two categories without the shared prefix", () => {
     const counts = new Map<ProcessActivity, number>([["read", 1], ["search", 1]]);
@@ -391,9 +414,23 @@ describe("processSegmentTitle", () => {
     expect(heading.detail).toBe("npm te");
   });
 
-  it("drops a stale detail once reasoning takes over", () => {
+  it("replaces a stale tool detail with the reasoning tail the row shows", () => {
     const heading = processSegmentTitle(
-      [{ ...call("bash", { command: "npm test" }), running: true }, { ...thinking(), live: true }],
+      [
+        { ...call("bash", { command: "npm test" }), running: true },
+        { block: { type: "thinking", thinking: "先看测试\n再看实现" }, live: true },
+      ],
+      zh,
+    );
+    expect(heading.title).toBe("正在分析请求");
+    // The tool's argument is gone — that work has moved on — and the header
+    // names the thought instead, matching the streaming reasoning row.
+    expect(heading.detail).toBe("再看实现");
+  });
+
+  it("has no detail for a live reasoning block that is still empty", () => {
+    const heading = processSegmentTitle(
+      [{ block: { type: "thinking", thinking: "" }, live: true }],
       zh,
     );
     expect(heading.title).toBe("正在分析请求");

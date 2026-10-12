@@ -357,6 +357,13 @@ export function processTitle(counts: ReadonlyMap<ProcessActivity, number>, t: Tr
  */
 const LIVE_DETAIL_MAX_CHARS = 160;
 
+/** Clamp one live detail to dsh's per-title budget, counted in code points. */
+function clampLiveDetail(text: string): string {
+  const characters = [...text];
+  if (characters.length <= LIVE_DETAIL_MAX_CHARS) return text;
+  return `${characters.slice(0, LIVE_DETAIL_MAX_CHARS - 1).join("").trimEnd()}…`;
+}
+
 /**
  * One line naming what a tool call is doing, for a live group's title.
  *
@@ -366,10 +373,19 @@ const LIVE_DETAIL_MAX_CHARS = 160;
  * (`LIVE_TOOL_DETAIL_KEYS`) because its tools are a different set.
  */
 export function liveToolDetail(toolName: string, args: Record<string, unknown> | undefined): string {
-  const summary = deriveSummary(classify(toolName), args);
-  const characters = [...summary];
-  if (characters.length <= LIVE_DETAIL_MAX_CHARS) return summary;
-  return `${characters.slice(0, LIVE_DETAIL_MAX_CHARS - 1).join("").trimEnd()}…`;
+  return clampLiveDetail(deriveSummary(classify(toolName), args));
+}
+
+/**
+ * One line naming what the model is reasoning about, for a live group's title.
+ *
+ * Mirrors `ThinkingBlock`'s live rule — a streaming reasoning row tracks the
+ * *last* line with content, so the line moves with the output instead of
+ * freezing on a sentence the model has moved past. A group standing in for that
+ * row should name the same thought the row itself shows.
+ */
+export function liveThinkingDetail(text: string): string {
+  return clampLiveDetail(lastNonBlankLine(text).replaceAll("**", ""));
 }
 
 /** A process segment's header: the running activity, or a closed summary. */
@@ -379,7 +395,10 @@ export interface ProcessSegmentTitle {
   running: boolean;
   /** The live step is a tool call still writing its arguments; see `PREPARE_TITLE_KEYS`. */
   preparing?: boolean;
-  /** One-line argument summary of the live tool call, when it has one. */
+  /**
+   * One-line summary of the live step: the running tool's argument, or a
+   * reasoning block's streaming tail. Absent when the step has neither.
+   */
   detail?: string;
 }
 
@@ -416,9 +435,11 @@ export function processSegmentTitle<
       // latest live step wins, so this overwrites an earlier tool's category.
       running = "thinking";
       preparing = false;
-      // Reasoning names no argument, and a detail left over from an earlier tool
-      // in this stretch would describe work that has already moved on.
-      detail = undefined;
+      // A left-over detail from an earlier tool would describe work that has
+      // already moved on, but reasoning is not empty: its streaming tail is
+      // exactly what the row itself shows, so the header names the same thought.
+      const named = liveThinkingDetail((step.block as { thinking?: string }).thinking ?? "");
+      detail = named.length > 0 ? named : undefined;
     }
   }
   // The live label names the activity the stretch is on: the streaming (or
