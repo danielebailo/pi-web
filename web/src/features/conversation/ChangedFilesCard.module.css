@@ -266,41 +266,21 @@ button.row:focus-visible {
   max-height: 320px;
   overflow: auto;
   padding: 6px 0;
-  font-family: var(--ds-font-family-code);
-  font-size: 11.5px;
-  line-height: 18px;
+}
+
+/* The rows are the panel's own (`DiffLines`, drawn over the panel's `.patch`
+ * class), so the two cannot disagree about a line number. Only the gap between
+ * hunks is the preview's to decide: the panel draws a header between them, and a
+ * preview has no header — without a gap, a file edited three times would read as
+ * one continuous run of lines. */
+.previewHunk + .previewHunk {
+  margin-top: 2px;
 }
 
 .previewNote {
   padding: 6px 12px;
   color: var(--dsw-alias-label-tertiary);
   font-size: 11.5px;
-}
-
-.line {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 0 12px;
-  white-space: pre;
-}
-
-.lineAdd {
-  background: var(--dsw-alias-state-success-tertiary);
-}
-
-.lineDel {
-  background: var(--dsw-alias-interactive-bg-hover-danger);
-}
-
-.marker {
-  flex: none;
-  width: 8px;
-  color: var(--dsw-alias-label-dimmed);
-}
-
-.lineText {
-  min-width: 0;
 }
 
 @media (pointer: coarse) {

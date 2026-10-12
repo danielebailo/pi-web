@@ -2,22 +2,66 @@
  * One hunk of a unified diff, drawn with both line numbers and collapsible on
  * its own.
  *
- * Shared by the changes panel and a turn's review tab: both draw the same object
- * — git's patch text or pi's, both parsed by `diff-parse.ts` — so the row
- * geometry, the number gutters and the fold rule live in one place rather than
- * drifting apart in two. The styles come from `ChangesTab.module.css`, which is
- * where this project keeps its diff rows; dsh splits them into a
- * `FileDiff.module.css` for the same reason.
+ * Shared by the changes panel, a turn's review tab, and the turn-tail card's
+ * hover preview: all three draw the same object — git's patch text or pi's,
+ * parsed by `diff-parse.ts` — so the row geometry, the number gutters and the
+ * fold rule live in one place rather than drifting apart. The styles come from
+ * `ChangesTab.module.css`, which is where this project keeps its diff rows; dsh
+ * splits them into a `FileDiff.module.css` for the same reason.
  */
 import { useState } from "react";
 import clsx from "clsx";
 import { useT } from "../../lib/app-state.ts";
-import type { DiffHunk } from "./diff-parse.ts";
+import type { DiffHunk, DiffLine } from "./diff-parse.ts";
 import { TreeChevronIcon } from "./rightbar-icons.tsx";
 import styles from "./ChangesTab.module.css";
 
 /** Hunk lines a file opens with before its own diffs start collapsed. */
 const HUNK_OPEN_LINES = 80;
+
+/** The sign a drawn row carries; a context line has neither and gets the space. */
+function markerOf(kind: DiffLine["kind"]): string {
+  return kind === "add" ? "+" : kind === "del" ? "-" : " ";
+}
+
+/**
+ * One hunk's lines, numbered on both sides.
+ *
+ * Split out of {@link DiffHunkView} so the turn-tail card's hover preview can
+ * draw the same rows without the fold control or the hunk header — dsh shares
+ * one `FileDiff` between its preview and its review tab for exactly this reason,
+ * and two renderers are free to disagree about a line number where one is not.
+ *
+ * @param hunk - a parsed hunk; its `meta` lines (the `@@` header) are not drawn.
+ * @param wrap - whether a long line wraps. The panel does, because it scrolls
+ * with its file and has the height to spare; a preview does not, because it
+ * opens over the transcript and scrolls sideways instead (see
+ * `ChangedFilesCard`).
+ */
+export function DiffLines({ hunk, wrap = true }: { hunk: DiffHunk; wrap?: boolean }) {
+  return (
+    <>
+      {hunk.lines.map((line, index) =>
+        line.kind === "meta" ? null : (
+          <div
+            className={clsx(
+              styles.line,
+              !wrap && styles.lineNoWrap,
+              line.kind === "add" && styles.lineAdd,
+              line.kind === "del" && styles.lineDel,
+            )}
+            key={`${String(index)}:${line.text}`}
+          >
+            <span className={styles.num}>{line.oldLine ?? ""}</span>
+            <span className={styles.num}>{line.newLine ?? ""}</span>
+            <span className={styles.marker}>{markerOf(line.kind)}</span>
+            <span className={styles.text}>{line.text}</span>
+          </div>
+        ),
+      )}
+    </>
+  );
+}
 
 /**
  * One hunk, collapsible on its own.
@@ -49,27 +93,7 @@ export function DiffHunkView({ hunk }: { hunk: DiffHunk }) {
           {open ? "" : ` · ${t("fileDiff.expandHint")}`}
         </span>
       </button>
-      {open
-        ? hunk.lines.map((line, index) =>
-            line.kind === "meta" ? null : (
-              <div
-                className={clsx(
-                  styles.line,
-                  line.kind === "add" && styles.lineAdd,
-                  line.kind === "del" && styles.lineDel,
-                )}
-                key={`${String(index)}:${line.text}`}
-              >
-                <span className={styles.num}>{line.oldLine ?? ""}</span>
-                <span className={styles.num}>{line.newLine ?? ""}</span>
-                <span className={styles.marker}>
-                  {line.kind === "add" ? "+" : line.kind === "del" ? "-" : " "}
-                </span>
-                <span className={styles.text}>{line.text}</span>
-              </div>
-            ),
-          )
-        : null}
+      {open ? <DiffLines hunk={hunk} /> : null}
     </div>
   );
 }

@@ -1,8 +1,10 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Translate } from "../../lib/i18n/index.ts";
 import { ChevronIcon } from "../../components/icons.tsx";
+import { DiffLines } from "../rightbar/DiffHunk.tsx";
 import { DiffIcon, FileIcon } from "../rightbar/rightbar-icons.tsx";
 import { parseUnifiedDiff } from "../rightbar/diff-parse.ts";
+import patchStyles from "../rightbar/ChangesTab.module.css";
 import type { TurnFile } from "./turn-files.ts";
 import styles from "./ChangedFilesCard.module.css";
 import { useT } from "../../lib/app-state.ts";
@@ -15,6 +17,15 @@ const COLLAPSED_ROWS = 4;
 
 /** dsh opens a row's comparison after half a second of hover, not on contact. */
 const PREVIEW_DELAY_MS = 500;
+
+/**
+ * Grace a pointer gets to travel from a row onto the open comparison.
+ *
+ * dsh's `HoverCard` keeps the same 200ms for the same trip (`usePointerGrace`):
+ * without it the pane disappears the moment the pointer leaves the row, so the
+ * scrollport it draws and the text in it can never be used.
+ */
+const PREVIEW_GRACE_MS = 200;
 
 /**
  * Room a comparison needs above the card before it opens upward.
@@ -87,11 +98,15 @@ export function ChangedFilesCard({
   /** True when the comparison is placed under the card instead of over it. */
   const [below, setBelow] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  const timer = useRef<number | null>(null);
+  /** The half-second dwell a row must hold before its comparison opens. */
+  const armTimer = useRef<number | null>(null);
+  /** The grace a pointer gets to cross from a row onto the open comparison. */
+  const closeTimer = useRef<number | null>(null);
 
   useEffect(
     () => () => {
-      if (timer.current !== null) clearTimeout(timer.current);
+      if (armTimer.current !== null) clearTimeout(armTimer.current);
+      if (closeTimer.current !== null) clearTimeout(closeTimer.current);
     },
     [],
   );
@@ -111,34 +126,66 @@ export function ChangedFilesCard({
     onOpenChanges?.(turn, index);
   };
 
+  /** A pointer is back (on a row, or on the comparison): the pane stays up. */
+  const cancelClose = (): void => {
+    if (closeTimer.current === null) return;
+    clearTimeout(closeTimer.current);
+    closeTimer.current = null;
+  };
+
+  /** Drop a pending or already-open comparison now. */
   const cancelPreview = (): void => {
-    if (timer.current !== null) {
-      clearTimeout(timer.current);
-      timer.current = null;
+    if (armTimer.current !== null) {
+      clearTimeout(armTimer.current);
+      armTimer.current = null;
     }
+    cancelClose();
     setPreview(null);
   };
-  /** A row arms the comparison half a second in, so passing over the card costs nothing. */
+
+  /**
+   * A row arms the comparison half a second in, so passing over the card costs
+   * nothing. Every row arms one, including a file whose patch this transcript
+   * cannot draw: the pane then says why instead of the hover doing nothing.
+   */
   const armPreview = (index: number): void => {
-    if (timer.current !== null) clearTimeout(timer.current);
-    if (files[index]?.patches.length === 0) return;
-    timer.current = window.setTimeout(() => {
-      timer.current = null;
+    cancelClose();
+    if (armTimer.current !== null) clearTimeout(armTimer.current);
+    armTimer.current = window.setTimeout(() => {
+      armTimer.current = null;
       // Scrollport top, not window top: the transcript scrolls inside its own
       // box, and a panel that clears the window can still be clipped by it.
       setBelow((rootRef.current?.getBoundingClientRect().top ?? 0) < PREVIEW_ROOM_PX);
       setPreview(index);
     }, PREVIEW_DELAY_MS);
   };
-  const hoverProps = (file: TurnFile, index: number) =>
-    file.patches.length === 0
-      ? {}
-      : {
-          onMouseEnter: () => armPreview(index),
-          onMouseLeave: cancelPreview,
-          onFocus: () => armPreview(index),
-          onBlur: cancelPreview,
-        };
+
+  /**
+   * The pointer left a row, or left the comparison itself.
+   *
+   * The close is delayed so the pointer can cross the few pixels between the two
+   * (see {@link PREVIEW_GRACE_MS}); coming back to either cancels it. The arm
+   * timer goes with it — a pointer already on its way out should not still open
+   * a pane on the row it is leaving.
+   */
+  const scheduleClose = (): void => {
+    if (armTimer.current !== null) {
+      clearTimeout(armTimer.current);
+      armTimer.current = null;
+    }
+    if (closeTimer.current !== null) clearTimeout(closeTimer.current);
+    closeTimer.current = window.setTimeout(() => {
+      closeTimer.current = null;
+      setPreview(null);
+    }, PREVIEW_GRACE_MS);
+  };
+
+  const hoverProps = (index: number) => ({
+    onMouseEnter: () => armPreview(index),
+    onMouseLeave: scheduleClose,
+    onFocus: () => armPreview(index),
+    onBlur: scheduleClose,
+  });
 
   const headline = single === undefined ? t("editedFiles.title", { count: files.length }) : null;
   const header = (
@@ -190,7 +237,7 @@ export function ChangedFilesCard({
             className={styles.header}
             aria-label={headerLabel}
             onClick={() => openAt(0)}
-            {...(single === undefined ? {} : hoverProps(single, 0))}
+            {...(single === undefined ? {} : hoverProps(0))}
           >
             {header}
           </button>
@@ -204,7 +251,7 @@ export function ChangedFilesCard({
               const index = files.indexOf(file);
               const label = <span className={styles.path}>{file.display}</span>;
               const badge = <span className={styles.counts}>{fileCounts(file, t)}</span>;
-              const hover = hoverProps(file, index);
+              const hover = hoverProps(index);
               return (
                 <li key={file.path}>
                   {openable ? (
@@ -252,7 +299,11 @@ export function ChangedFilesCard({
       </div>
 
       {preview === null || files[preview] === undefined ? null : (
-        <ChangedFilePreview file={files[preview] as TurnFile} t={t} />
+        <ChangedFilePreview
+          file={files[preview] as TurnFile}
+          onEnter={cancelClose}
+          onLeave={scheduleClose}
+        />
       )}
     </div>
   );
@@ -266,36 +317,54 @@ export function ChangedFilesCard({
  * from — so the header can never claim `+3 -1` over a diff showing something
  * else. dsh hides the hunk headers in this preview because the panel it opens is
  * one click away; this one does the same, and keeps only the lines that carry
- * the change.
+ * the change. The rows themselves are {@link DiffLines}, the same component the
+ * changes panel and the review tab draw, so a line number here is read the way
+ * every other diff in the app reads it.
+ *
+ * The pane is a pointer target in its own right: `onEnter`/`onLeave` keep it up
+ * while a reader scrolls it or selects from it, which is the whole reason the
+ * card delays its close.
+ *
+ * Exported because the card can only mount it after a dwell no static render can
+ * perform: this is the component the pane's contents are asserted through.
  */
-function ChangedFilePreview({ file, t }: { file: TurnFile; t: Translate }) {
+export function ChangedFilePreview({
+  file,
+  onEnter,
+  onLeave,
+}: {
+  file: TurnFile;
+  onEnter: () => void;
+  onLeave: () => void;
+}) {
+  const t = useT();
   const hunks = useMemo(
     () => file.patches.flatMap((patch) => parseUnifiedDiff(patch).hunks),
     [file.patches],
   );
 
   return (
-    <div className={styles.preview} data-turn-files-preview>
-      <div className={styles.previewPath}>{file.display}</div>
-      <div className={styles.previewBody}>
-        {hunks.map((hunk, hunkIndex) => (
-          <Fragment key={`${String(hunkIndex)}:${hunk.header}`}>
-            {hunk.lines.map((line, lineIndex) =>
-              line.kind === "meta" ? null : (
-                <div
-                  className={`${styles.line} ${line.kind === "add" ? styles.lineAdd : line.kind === "del" ? styles.lineDel : ""}`}
-                  key={`${String(lineIndex)}:${line.text}`}
-                >
-                  <span className={styles.marker}>
-                    {line.kind === "add" ? "+" : line.kind === "del" ? "-" : " "}
-                  </span>
-                  <span className={styles.lineText}>{line.text}</span>
-                </div>
-              ),
-            )}
-          </Fragment>
-        ))}
-        {hunks.length === 0 ? <div className={styles.previewNote}>{t("editedFiles.oversized")}</div> : null}
+    <div
+      className={styles.preview}
+      data-turn-files-preview
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+    >
+      <div className={styles.previewPath} title={file.path}>
+        {file.display}
+      </div>
+      <div className={`${styles.previewBody} ${patchStyles.patch}`}>
+        {hunks.length === 0 ? (
+          <p className={styles.previewNote}>
+            {file.oversized ? t("turnChanges.oversized") : t("turnChanges.noDiff")}
+          </p>
+        ) : (
+          hunks.map((hunk, hunkIndex) => (
+            <div className={styles.previewHunk} key={`${String(hunkIndex)}:${hunk.header}`}>
+              <DiffLines hunk={hunk} wrap={false} />
+            </div>
+          ))
+        )}
       </div>
     </div>
   );

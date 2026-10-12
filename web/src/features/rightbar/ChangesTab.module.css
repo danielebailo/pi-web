@@ -409,6 +409,14 @@
   color: var(--dsw-alias-label-primary);
 }
 
+/* The hover preview draws these same rows, but it opens over the transcript
+ * rather than scrolling with a file — it has no height to grow into, so a long
+ * line scrolls sideways instead of wrapping. */
+.lineNoWrap .text {
+  white-space: pre;
+  word-break: normal;
+}
+
 /* The commit box sits above the lists, so its divider is what separates the
  * two fixed controls from the scrolling content. */
 .commit {
