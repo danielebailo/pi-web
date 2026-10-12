@@ -16,7 +16,7 @@ Start it with `npx pi-web-simple` — Node.js `>= 22.19.0`, bound to `127.0.0.1`
 
 - **Workspaces and sessions** — a server-side directory picker; one directory = one project, each project holding that directory's sessions; fork and rename; grouping (by workspace / workspace tree / single list) and ordering (manual / recently updated), with rows draggable into place; in-place search; a drawer sidebar on narrow frames.
 - **Conversation** — SSE streaming with Markdown and syntax highlighting; thinking and tool steps folded by default; compaction as its own row in the transcript; turn navigation and retry.
-- **Composition** — one idle-recycled pi process per session; an optional **minimal preset** at session creation (a one-line prompt and `bash` alone, fixed for the session's life).
+- **Composition** — one idle-recycled pi process per session; an optional **minimal preset** at session creation (a one-line prompt and `bash` alone, still changeable from the header until the first turn lands).
 - **Input** — image input; `@` file mentions completed from `git ls-files`; `/` command completion; one card for the model and its thinking level; a context-usage reading beside it.
 - **Questions and plans** — `ask_user_question` carries a whole batch at once and answers it in one go; a timed-out batch can still be answered later; a question carrying an `intent` renders as an approval card for a plan.
 - **Right sidebar** — file tree, preview, git changes (stage / commit / push / restore / switch branch), terminal, embedded browser; splits into two columns, with tabs draggable out into floating panels.
@@ -25,7 +25,7 @@ Start it with `npx pi-web-simple` — Node.js `>= 22.19.0`, bound to `127.0.0.1`
 
 ## At a glance
 
-**Minimal mode** — picked when a session is created; the composition is fixed from then on (`bash` alone).
+**Minimal mode** — picked when a session is created, and still changeable from the header until its first turn lands (`bash` alone).
 
 ![The mode picker on the new-session page](https://cdn.jsdelivr.net/gh/woxihejinghao/pi-web@main/docs/images/mode-picker-dark.en.png)
 
