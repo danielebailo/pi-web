@@ -377,6 +377,26 @@ describe("prewarming", () => {
     expect(mocked.prewarmSession).toHaveBeenCalledWith("project-1");
   });
 
+  it("boots with every workspace folded", async () => {
+    const project: ProjectView = {
+      id: "project-1",
+      path: "/home/me/proj",
+      title: "proj",
+      order: 0,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      exists: true,
+    };
+    mocked.listProjects.mockResolvedValue([project]);
+
+    await actions.bootstrap();
+
+    // Selecting the first workspace is not the same as opening it: the sidebar
+    // starts with every session list closed, even the one that is selected.
+    expect(appStore.get().selectedProjectId).toBe("project-1");
+    expect(appStore.get().expandedProjects).toEqual({});
+  });
+
   it("loads the host home directory so paths can be shown as ~", async () => {
     mocked.listProjects.mockResolvedValue([]);
 

@@ -479,11 +479,13 @@ export const actions = {
     try {
       const projects = await api.listProjects();
       appStore.update((state) => ({ ...state, projects, status: "ready" }));
+      // The first workspace is selected but deliberately left folded. Selecting
+      // it is what gives the empty new-session page a target and warms a pi
+      // process; opening its session list is a click the user makes. A launch
+      // with several workspaces therefore lands on all of them closed, and none
+      // of them is unfolded on the user's behalf.
       const first = projects[0];
-      if (first) {
-        await actions.selectProject(first.id);
-        actions.expandProject(first.id);
-      }
+      if (first) await actions.selectProject(first.id);
     } catch (err) {
       appStore.update((state) => ({
         ...state,
