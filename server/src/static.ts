@@ -12,9 +12,11 @@
  * - **`/api/...` never reaches this module.** An unknown endpoint has to come
  *   back as JSON; falling through to `index.html` would hand `fetch` an HTML
  *   shell that fails as a parse error instead of a readable 404.
- * - **Every unmatched path returns `index.html`.** The client router keeps its
- *   own state, so a hard refresh on a deep link has to boot the same shell
- *   rather than 404.
+ * - **Every unmatched path returns `index.html`, except under `/assets/`.** The
+ *   client router keeps its own state, so a hard refresh on a deep link has to
+ *   boot the same shell rather than 404. A fingerprinted asset is the one thing
+ *   that can be asked for by a name the build no longer has, and answering that
+ *   with HTML turns a stale reference into a module the browser refuses.
  */
 import { createReadStream, existsSync, statSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -49,6 +51,15 @@ const CONTENT_TYPES: Record<string, string> = {
 };
 
 const ASSET_DIR = `${sep}assets${sep}`;
+
+/**
+ * The URL prefix Vite fingerprints every emitted file under.
+ *
+ * Kept apart from `ASSET_DIR` because the two are matched against different
+ * things: a filesystem path, which uses the platform separator, and a URL path,
+ * which never does.
+ */
+const ASSET_PREFIX = "/assets/";
 
 /**
  * Vite fingerprints everything it emits into `assets/`, so those files are
@@ -131,6 +142,15 @@ export function createStaticHandler(root: string | null): StaticHandler | null {
       await sendFile(res, file, method);
       return true;
     }
+
+    // A missing fingerprinted asset is a stale reference, not a client route.
+    // Answering it with `index.html` hands a dynamic `import()` a
+    // `200 text/html`, which the browser reports as an unusable module and the
+    // caller turns into whatever it does with a failed import — for a page whose
+    // served directory was rebuilt underneath it that is a blank window. False
+    // lets the caller answer the 404 this is. Nothing a client routes to lives
+    // under this prefix; Vite's own `outDir` owns it.
+    if (pathname.startsWith(ASSET_PREFIX)) return false;
 
     await sendFile(res, indexHtml, method);
     return true;

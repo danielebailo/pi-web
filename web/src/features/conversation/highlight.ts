@@ -297,16 +297,28 @@ function ensureLanguage(lang: string): boolean {
   }
   if (!loading.has(lang)) {
     loading.add(lang);
-    void load().then((module) => {
-      highlighter.loadLanguageSync(module.default);
-      // Before the notification, not after: the re-render this triggers is the
-      // first time a real fence of this language is tokenized, and it has to
-      // already be warmed or that fence would be drawn with a different rule
-      // set than every later pass over the same text.
-      warmUpLanguage(lang);
-      grammarVersion += 1;
-      for (const listener of languageListeners) listener();
-    });
+    void load()
+      .then((module) => {
+        highlighter.loadLanguageSync(module.default);
+        // Before the notification, not after: the re-render this triggers is the
+        // first time a real fence of this language is tokenized, and it has to
+        // already be warmed or that fence would be drawn with a different rule
+        // set than every later pass over the same text.
+        warmUpLanguage(lang);
+        grammarVersion += 1;
+        for (const listener of languageListeners) listener();
+      })
+      .catch((error: unknown) => {
+        // A grammar chunk can be gone: a build rewrites the served directory
+        // while a window is open, and the request for the old fingerprint comes
+        // back as the SPA's HTML shell. A code fence is not worth a page reload
+        // — plain text is the right answer — and `loading` keeps a dead import
+        // from being asked for again on every render. It is logged because
+        // "this language never gets colours" is otherwise unexplainable.
+        console.warn(
+          `[highlight] grammar "${lang}" failed to load: ${(error as Error).message}`,
+        );
+      });
   }
   return false;
 }

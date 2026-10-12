@@ -1,0 +1,129 @@
+/*
+ * A boundary's panel, in the two places one is hung.
+ *
+ * The app-level panel replaces the whole shell, so it centres in whatever
+ * `#root` is; the pane-level one is a right-sidebar tab body, which is a
+ * narrow column that may be short — centring there would float the copy in the
+ * middle of a strip, so it starts at the top and reads left-aligned instead.
+ */
+
+.panel {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  /* `min-height` rather than `height`: the app-level panel sits in `#root`,
+   * which is a block of `100dvh`, while the pane-level one is a flex item in a
+   * right-sidebar column. The minimum fills the first and `flex` fills the
+   * second, so neither parent can be outgrown by the copy. */
+  flex: 1 1 auto;
+  min-height: 100%;
+  padding: 24px;
+  text-align: center;
+}
+
+.panel[data-scope="pane"] {
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 20px 14px;
+  text-align: left;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-state-warn-primary);
+}
+
+.title {
+  margin: 0;
+  color: var(--dsw-alias-label-primary);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.description {
+  margin: 0;
+  max-width: 380px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.retry,
+.reload {
+  height: 28px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* Retrying is the cheaper action and the likelier fix, so it carries the
+ * emphasis; the reload beside it is the fallback, drawn as an outline. */
+.retry {
+  background: var(--dsw-alias-button-primary-fill);
+  color: var(--dsw-alias-label-primary-inverted);
+}
+
+.retry:hover {
+  background: var(--dsw-alias-button-primary-hover);
+}
+
+.reload {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--dsw-alias-border-l2);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.reload:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* Folded shut: a reader who hit this wants the button, and whoever they hand
+ * the screenshot to wants the stack. Both are one click apart. */
+.details {
+  width: 100%;
+  max-width: 520px;
+  margin-top: 4px;
+}
+
+.summary {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.stack {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  max-height: 200px;
+  overflow: auto;
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-tertiary);
+  font-family: var(--ds-font-family-code);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-align: left;
+}

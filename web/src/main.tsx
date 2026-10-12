@@ -6,6 +6,7 @@ import "./theme/index.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
+import { ErrorBoundary } from "./components/ErrorBoundary.tsx";
 import { appStore } from "./lib/app-state.ts";
 import { markDocumentPlatform } from "./lib/desktop.ts";
 import { applyAppearance, watchSystemAppearance } from "./lib/theme.ts";
@@ -26,8 +27,14 @@ watchSystemAppearance(() => {
   if (appStore.get().settings.appearance === "system") applyAppearance("system");
 });
 
+// The boundary is created here rather than inside `App` because the errors it
+// exists for come out of `App`'s own subtree: whatever sits above it is the
+// last thing standing when React unmounts a root, and an empty `#root` in a
+// desktop window is a blank page with no reason on it.
 createRoot(container).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 );

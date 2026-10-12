@@ -1,5 +1,7 @@
 import { lazy, Suspense } from "react";
+import { ErrorBoundary } from "../../components/ErrorBoundary.tsx";
 import { useT } from "../../lib/app-state.ts";
+import { reloadOnceForStaleChunk } from "../../lib/stale-chunk.ts";
 import { BrowserTab } from "./BrowserTab.tsx";
 import { ChangesTab } from "./ChangesTab.tsx";
 import { FilesTab } from "./FilesTab.tsx";
@@ -19,26 +21,25 @@ import pane from "./Pane.module.css";
  * behind the boundary, and the chunk comes off the same origin as the page.
  */
 const TerminalTab = lazy(async () => {
-  const module = await import("./TerminalTab.tsx");
-  return { default: module.TerminalTab };
+  try {
+    const module = await import("./TerminalTab.tsx");
+    return { default: module.TerminalTab };
+  } catch (error) {
+    // A build replaced the directory this page was served from, so this
+    // fingerprint no longer exists and the request came back as the SPA's HTML
+    // shell instead of a script. Reloading refetches the current one, and it is
+    // allowed once per chunk; past that the rejection has to reach the boundary
+    // below, which says what happened (see `lib/stale-chunk.ts`).
+    if (reloadOnceForStaleChunk("terminal-tab")) {
+      // Never settles: the document is on its way out, and staying suspended
+      // keeps the loading note up rather than flashing a panel on the way.
+      return new Promise<never>(() => {});
+    }
+    throw error;
+  }
 });
 
-/**
- * One tab's content, wherever it is being drawn.
- *
- * A pane and a floating panel show the same thing, so they show it through the
- * same component: a second switch on `tab.kind` is how a new tab type ends up
- * working in one place and not the other. Callers pass `key={tab.id}` so
- * switching tabs — or a tab moving between panes — remounts rather than reusing
- * the previous body's state.
- */
-export function TabBody({
-  sessionPath,
-  projectId,
-  projectPath,
-  tab,
-  onOpenFile,
-}: {
+interface TabBodyProps {
   /** The session whose surface this tab belongs to; the terminal store and the
    * right sidebar are both keyed by it, so one value serves both. */
   sessionPath: string;
@@ -46,7 +47,35 @@ export function TabBody({
   projectPath: string;
   tab: RightbarTab;
   onOpenFile: (path: string) => void;
-}) {
+}
+
+/**
+ * One tab's content, wherever it is being drawn.
+ *
+ * Hung under the pane-level boundary because a tab is the app's only optional
+ * surface: a terminal whose chunk is missing, or a diff that parses into a
+ * shape nothing expected, should cost that one tab rather than the whole
+ * conversation — and the shell that replaces it offers a retry.
+ *
+ * Callers pass `key={tab.id}`, which is on this element, so switching tabs — or
+ * a tab moving between panes — remounts rather than reusing the previous
+ * body's state. A retry after a failure therefore starts clean. */
+export function TabBody(props: TabBodyProps) {
+  return (
+    <ErrorBoundary scope="pane">
+      <TabContent {...props} />
+    </ErrorBoundary>
+  );
+}
+
+/**
+ * The switch itself.
+ *
+ * A pane and a floating panel show the same thing, so they show it through the
+ * same component: a second switch on `tab.kind` is how a new tab type ends up
+ * working in one place and not the other.
+ */
+function TabContent({ sessionPath, projectId, projectPath, tab, onOpenFile }: TabBodyProps) {
   const t = useT();
   if (tab.kind === "files") {
     return (

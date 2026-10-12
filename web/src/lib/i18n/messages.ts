@@ -744,6 +744,17 @@ export const zhCN = {
   "session.empty": "还没有会话。",
   "layout.disconnected": "无法连接服务端，请确认 API 已启动。",
   "layout.dismiss": "关闭提示",
+
+  // --- errors ---------------------------------------------------------------
+  // What a boundary draws when a render fails. Two titles for two scopes: one
+  // replaces the whole shell, the other sits in a single right-side pane,
+  // where a reload is a heavier answer than a retry.
+  "error.title": "这个页面出错了",
+  "error.paneTitle": "这个面板出错了",
+  "error.description": "这里遇到了一个未处理的错误。可以先重试；重试无效就重新载入页面。",
+  "error.retry": "重试",
+  "error.reload": "重新载入页面",
+  "error.details": "错误详情",
 } as const;
 
 export type MessageKey = keyof typeof zhCN;
@@ -1447,6 +1458,15 @@ export const en: Record<MessageKey, string> = {
   "session.empty": "No sessions yet.",
   "layout.disconnected": "Cannot reach the server. Is the API running?",
   "layout.dismiss": "Dismiss",
+
+  // --- errors ---------------------------------------------------------------
+  "error.title": "This page ran into a problem",
+  "error.paneTitle": "This panel failed to draw",
+  "error.description":
+    "Something here raised an error nothing handled. Try again first; reload the page if it keeps coming back.",
+  "error.retry": "Try again",
+  "error.reload": "Reload the page",
+  "error.details": "Error details",
 };
 
 export const MESSAGES: Record<UiLanguage, Record<MessageKey, string>> = {
