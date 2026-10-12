@@ -12,11 +12,30 @@ Start it with `npx pi-web-simple` — Node.js `>= 22.19.0`, bound to `127.0.0.1`
 
 *Dark and light follow the system by default, and can be pinned in settings. Both show the same session: workspace and sessions on the left, the conversation with its folded thinking and tool steps in the middle, and the file changes on the right, where they can be staged, committed and pushed directly.*
 
-**Highlights** — server-side directory picker · one idle-recycled pi process per session · SSE streaming chat with Markdown + shiki highlighting · image input · `@` file mentions in the composer and on the new-session page (completed from `git ls-files`) · session fork and rename · model picker · a minimal preset at session creation (one-line prompt, bash only) · left sidebar with view options (grouping / ordering, drag to reorder) and in-place search · right sidebar (file tree, preview, git changes, terminal, embedded browser) that splits into two columns, with tabs draggable out into floating panels · full git panel (stage, commit, push, restore, switch branch) · model / plugin / MCP settings.
+**Highlights**
 
-The right sidebar's **terminal** needs one optional native dependency, `npm install node-pty` (already declared as an `optionalDependency`); without it only that tab is greyed out, with the reason on hover.
+- **Workspaces and sessions** — a server-side directory picker; one directory = one project, each project holding that directory's sessions; fork and rename; grouping (by workspace / workspace tree / single list) and ordering (manual / recently updated), with rows draggable into place; in-place search; a drawer sidebar on narrow frames.
+- **Conversation** — SSE streaming with Markdown and syntax highlighting; thinking and tool steps folded by default; compaction as its own row in the transcript; turn navigation and retry.
+- **Composition** — one idle-recycled pi process per session; an optional **minimal preset** at session creation (a one-line prompt and `bash` alone, fixed for the session's life).
+- **Input** — image input; `@` file mentions completed from `git ls-files`; `/` command completion; one card for the model and its thinking level; a context-usage reading beside it.
+- **Questions and plans** — `ask_user_question` carries a whole batch at once and answers it in one go; a timed-out batch can still be answered later; a question carrying an `intent` renders as an approval card for a plan.
+- **Right sidebar** — file tree, preview, git changes (stage / commit / push / restore / switch branch), terminal, embedded browser; splits into two columns, with tabs draggable out into floating panels.
+- **Settings** — appearance and language, the model catalog (providers and entries, reasoning levels, context window, input types), plugins, MCP.
+- **Desktop app** — shares its data with the CLI; system notifications and a Dock / taskbar badge that opens the session.
 
-Right-sidebar shortcuts: `⌥⌘B` collapse / expand · `⌥⌘↵` full screen · `⌘P` open a file · `` ⌃` `` new terminal · `⌘T` new browser tab · `⌘\` split — in the browser the `⌘` ones become `⌥⌘`, because `⌘P` and `⌘T` belong to the browser. Everything behind them, and the drag-and-drop docking, is in the [design notes](./docs/design-notes.md).
+## At a glance
+
+**Minimal mode** — picked when a session is created; the composition is fixed from then on (`bash` alone).
+
+![The mode picker on the new-session page](https://cdn.jsdelivr.net/gh/woxihejinghao/pi-web@main/docs/images/mode-picker-dark.en.png)
+
+**`@` file mentions** — candidates come from `git ls-files`, and a chosen path lands in the sentence as one chip.
+
+![The @ file-mention menu in the composer](https://cdn.jsdelivr.net/gh/woxihejinghao/pi-web@main/docs/images/file-mention-dark.en.png)
+
+**Model and thinking level** — one card, with a level slider under it.
+
+![The model and thinking-level card](https://cdn.jsdelivr.net/gh/woxihejinghao/pi-web@main/docs/images/model-card-dark.en.png)
 
 ## Quick start
 
@@ -24,7 +43,7 @@ Right-sidebar shortcuts: `⌥⌘B` collapse / expand · `⌥⌘↵` full screen 
 npx pi-web-simple    # serves the UI + API on http://127.0.0.1:5319
 ```
 
-Every install path starts the same thing: one process serving the front end and the API, and opening the browser. Pick a row by how you expect to use it:
+Every install path starts the same thing, and opens the browser. Pick a row by how you expect to use it:
 
 | Install | Start it with | Best when |
 | :-- | :-- | :-- |
@@ -45,8 +64,6 @@ To keep it running after the terminal closes:
 PI_WEB_SIMPLE_OPEN=0 nohup pi-web-simple >/tmp/piws.log 2>&1 &
 pkill -f 'pi-web-simple/bin/pi-web-simple.js'   # stop it
 ```
-
-First run: click **+** in the left column, walk to the target directory in the picker (the shortcuts at the top jump straight to home / Desktop / Documents / Downloads / root, and a path can be pasted into the address bar), then click **Choose this directory**; click **+** under the project to start a session. The group header carries three buttons on its right — search, view options and **+**: view options switch the grouping (by workspace / workspace tree / single list) and the ordering (manual / recently updated), and with manual ordering workspace and session rows can be dragged straight into place. Every variable, with defaults: [environment variables](./docs/configuration.md).
 
 ### Desktop app
 
