@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import type { SlashCommand } from "../../lib/types.ts";
+import { resolveCompletion } from "./completion-dismiss.ts";
 import { detectSlashTrigger, filterCommands, type SlashTrigger } from "./slash.ts";
 
 export interface SlashCompletion {
@@ -26,11 +27,6 @@ export interface SlashCompletion {
   onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): boolean;
 }
 
-function sameTrigger(a: SlashTrigger | null, b: SlashTrigger | null): boolean {
-  if (a === null || b === null) return a === b;
-  return a.start === b.start && a.query === b.query;
-}
-
 /**
  * `/` completion for a prompt textarea.
  *
@@ -43,7 +39,8 @@ function sameTrigger(a: SlashTrigger | null, b: SlashTrigger | null): boolean {
  * `onKeyUp` also fires after the ArrowDown/ArrowUp this hook consumed, and
  * re-syncing there would reset the highlighted row on every keypress. The same
  * reasoning keeps an Escape from undoing itself: the `keyup` that follows it
- * would re-open the menu on the very token it just closed.
+ * would re-open the menu on the very token it just closed. `resolveCompletion`
+ * owns that rule and when a dismissal lapses.
  */
 export function useSlashCompletion(options: {
   setText(next: string): void;
@@ -78,10 +75,10 @@ export function useSlashCompletion(options: {
     const element = textareaRef.current;
     if (!element) return;
     const next = detectSlashTrigger(element.value, element.selectionStart ?? 0);
-    if (sameTrigger(triggerRef.current, next)) return;
-    if (sameTrigger(dismissedRef.current, next)) return;
-    dismissedRef.current = null;
-    applyTrigger(next);
+    const resolved = resolveCompletion(triggerRef.current, dismissedRef.current, next);
+    dismissedRef.current = resolved.dismissed;
+    if (resolved.trigger === triggerRef.current) return;
+    applyTrigger(resolved.trigger);
   }, [applyTrigger, textareaRef]);
 
   const select = useCallback(

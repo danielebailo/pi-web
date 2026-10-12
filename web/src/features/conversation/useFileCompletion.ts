@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { api } from "../../lib/api.ts";
 import type { FileSearchItem } from "../../lib/types.ts";
+import { resolveCompletion } from "./completion-dismiss.ts";
 import { detectAtTrigger, type AtTrigger } from "./file-token.ts";
 import { referenceStartAt } from "./reference-token.ts";
 
@@ -44,11 +45,6 @@ export interface FileCompletion {
   onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): boolean;
 }
 
-function sameTrigger(a: AtTrigger | null, b: AtTrigger | null): boolean {
-  if (a === null || b === null) return a === b;
-  return a.start === b.start && a.query === b.query;
-}
-
 /**
  * `@` completion for a prompt textarea.
  *
@@ -68,6 +64,10 @@ function sameTrigger(a: AtTrigger | null, b: AtTrigger | null): boolean {
  * - The pick is not written here. `insertReference` is the owner of the
  *   label → path map, so this hook only says *which* path and *where* the token
  *   began; see `useReferenceDraft`.
+ *
+ * An Escape suppresses its token with the same rules as `useSlashCompletion`,
+ * and for the same reason: one `keyup` (or one more letter) must not put back
+ * the menu the user just waved off. See `resolveCompletion`.
  */
 export function useFileCompletion(options: {
   textareaRef: RefObject<HTMLTextAreaElement | null>;
@@ -111,16 +111,13 @@ export function useFileCompletion(options: {
     const element = textareaRef.current;
     if (!element) return;
     const next = detectAtTrigger(element.value, element.selectionStart ?? 0);
+    const resolved = resolveCompletion(triggerRef.current, dismissedRef.current, next);
+    dismissedRef.current = resolved.dismissed;
     // A no-op when the token did not change: `onKeyUp` also fires after the
     // ArrowDown/ArrowUp this hook consumed, and re-syncing there would reset
     // the highlighted row on every keypress.
-    if (sameTrigger(triggerRef.current, next)) return;
-    // Escape closes the menu for the token it was showing, and the `keyup`
-    // that follows would otherwise put it straight back. Only a change to that
-    // token — another character, a different word — asks again.
-    if (sameTrigger(dismissedRef.current, next)) return;
-    dismissedRef.current = null;
-    applyTrigger(next);
+    if (resolved.trigger === triggerRef.current) return;
+    applyTrigger(resolved.trigger);
   }, [applyTrigger, textareaRef]);
 
   const enabled = projectId !== null && projectId !== undefined;
