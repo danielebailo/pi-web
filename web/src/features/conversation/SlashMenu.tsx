@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef } from "react";
 import clsx from "clsx";
 import type { SlashCommand } from "../../lib/types.ts";
 import { sourceLabels } from "./slash.ts";
+import menuStyles from "./Menu.module.css";
 import styles from "./SlashMenu.module.css";
 import { useT } from "../../lib/app-state.ts";
 
@@ -48,8 +49,8 @@ export function SlashMenu({ matches, highlight, onHighlight, onSelect }: SlashMe
   }, [highlight]);
 
   return (
-    <div className={styles.menu} role="listbox" aria-label={t("slash.commands")}>
-      <div className={styles.viewport} ref={viewportRef}>
+    <div className={menuStyles.menu} role="listbox" aria-label={t("slash.commands")}>
+      <div className={menuStyles.viewport} ref={viewportRef}>
         {sections.map((section) => (
           <Fragment key={section.label}>
             <div className={styles.sectionTitle}>{section.label}</div>
@@ -60,7 +61,7 @@ export function SlashMenu({ matches, highlight, onHighlight, onSelect }: SlashMe
                 role="option"
                 aria-selected={index === highlight}
                 data-active={index === highlight}
-                className={clsx(styles.item, index === highlight && styles.itemActive)}
+                className={clsx(menuStyles.item, index === highlight && menuStyles.itemActive)}
                 title={command.description ?? command.name}
                 onMouseEnter={() => onHighlight(index)}
                 // mousedown, not click: by click time the textarea has already

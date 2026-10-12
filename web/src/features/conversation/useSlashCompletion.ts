@@ -13,6 +13,15 @@ export interface SlashCompletion {
   sync(): void;
   /** Replace the `/token` under the caret with a complete command. */
   select(command: SlashCommand): void;
+  /**
+   * Close the menu outright.
+   *
+   * Unlike Escape this leaves no guard behind — it says the token is *gone*,
+   * not "not now" — which is what a send needs: clearing the draft is a
+   * programmatic write, so no `input` event reaches `sync()` and the menu would
+   * otherwise stay up over the transcript.
+   */
+  close(): void;
   /** Returns true when the key was consumed by the open menu. */
   onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): boolean;
 }
@@ -32,7 +41,9 @@ function sameTrigger(a: SlashTrigger | null, b: SlashTrigger | null): boolean {
  *
  * `sync()` is a no-op when the token did not change. That matters because
  * `onKeyUp` also fires after the ArrowDown/ArrowUp this hook consumed, and
- * re-syncing there would reset the highlighted row on every keypress.
+ * re-syncing there would reset the highlighted row on every keypress. The same
+ * reasoning keeps an Escape from undoing itself: the `keyup` that follows it
+ * would re-open the menu on the very token it just closed.
  */
 export function useSlashCompletion(options: {
   setText(next: string): void;
@@ -44,6 +55,8 @@ export function useSlashCompletion(options: {
   const [highlight, setHighlight] = useState(0);
   /** Mirrors `trigger` so `sync()` can compare without re-rendering. */
   const triggerRef = useRef<SlashTrigger | null>(null);
+  /** The token an Escape dismissed, so its own `keyup` does not reopen it. */
+  const dismissedRef = useRef<SlashTrigger | null>(null);
 
   const matches = trigger ? filterCommands(commands, trigger.query) : [];
 
@@ -53,11 +66,22 @@ export function useSlashCompletion(options: {
     setHighlight(0);
   }, []);
 
+  const dismiss = useCallback((): void => {
+    dismissedRef.current = triggerRef.current;
+    applyTrigger(null);
+  }, [applyTrigger]);
+
+  /** See `SlashCompletion.close` — used when the draft itself is gone. */
+  const close = useCallback((): void => applyTrigger(null), [applyTrigger]);
+
   const sync = useCallback((): void => {
     const element = textareaRef.current;
     if (!element) return;
     const next = detectSlashTrigger(element.value, element.selectionStart ?? 0);
-    if (!sameTrigger(triggerRef.current, next)) applyTrigger(next);
+    if (sameTrigger(triggerRef.current, next)) return;
+    if (sameTrigger(dismissedRef.current, next)) return;
+    dismissedRef.current = null;
+    applyTrigger(next);
   }, [applyTrigger, textareaRef]);
 
   const select = useCallback(
@@ -108,14 +132,14 @@ export function useSlashCompletion(options: {
         }
         case "Escape":
           event.preventDefault();
-          applyTrigger(null);
+          dismiss();
           return true;
         default:
           return false;
       }
     },
-    [applyTrigger, trigger, matches, highlight, select],
+    [applyTrigger, dismiss, trigger, matches, highlight, select],
   );
 
-  return { matches, open: trigger !== null && matches.length > 0, highlight, setHighlight, sync, select, onKeyDown };
+  return { matches, open: trigger !== null && matches.length > 0, highlight, setHighlight, sync, select, close, onKeyDown };
 }

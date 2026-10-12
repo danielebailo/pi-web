@@ -499,6 +499,104 @@ describe("sidebar ui state", () => {
 });
 
 /**
+ * Opening a session moves the selected workspace with it.
+ *
+ * The header names the selected project and every per-project surface is keyed
+ * on it, so a conversation opened from another workspace has to switch that
+ * selection. Without this the transcript changed while the header kept naming
+ * the workspace the reader had been in before.
+ */
+describe("session selection follows its workspace", () => {
+  const project = (id: string): ProjectView => ({
+    id,
+    path: `/home/me/${id}`,
+    title: id,
+    order: 0,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    exists: true,
+  });
+
+  /** Two workspaces, the first selected, with one session under `owner`. */
+  const seed = (owner: string, path: string): void => {
+    appStore.update((state) => ({
+      ...state,
+      projects: [project("p1"), project("p2")],
+      selectedProjectId: "p1",
+      sessions: { ...state.sessions, [owner]: [diskSession(path, "one")] },
+    }));
+  };
+
+  it("switches the workspace when the open session belongs to another one", () => {
+    const owner = "/home/me/.pi/agent/sessions/p2/one.jsonl";
+    seed("p2", owner);
+
+    actions.selectSession(owner);
+
+    expect(appStore.get().selectedProjectId).toBe("p2");
+    expect(appStore.get().selectedSessionPath).toBe(owner);
+  });
+
+  it("reveals the workspace it switches to", () => {
+    seed("p2", REAL_PATH);
+
+    actions.selectSession(REAL_PATH);
+
+    expect(appStore.get().expandedProjects.p2).toBe(true);
+  });
+
+  it("trusts an owner the loaded lists do not hold", () => {
+    // A flat-list row knows the workspace it was drawn under even when that
+    // page was never fetched, so the click carries the owner in.
+    appStore.update((state) => ({ ...state, selectedProjectId: "p1" }));
+
+    actions.selectSession(REAL_PATH, "p2");
+
+    expect(appStore.get().selectedProjectId).toBe("p2");
+  });
+
+  it("keeps the workspace when the session cannot be placed", () => {
+    appStore.update((state) => ({ ...state, selectedProjectId: "p1" }));
+
+    actions.selectSession("/unknown/session.jsonl");
+
+    expect(appStore.get().selectedProjectId).toBe("p1");
+    expect(appStore.get().selectedSessionPath).toBe("/unknown/session.jsonl");
+  });
+
+  it("finds a draft's owner in the unsaved list", () => {
+    appStore.update((state) => ({
+      ...state,
+      projects: [project("p1"), project("p2")],
+      selectedProjectId: "p1",
+      unsavedSessions: { p2: ["draft:abc"] },
+    }));
+
+    actions.selectSession("draft:abc");
+
+    expect(appStore.get().selectedProjectId).toBe("p2");
+  });
+
+  it("fetches the page of a workspace that was never loaded", async () => {
+    appStore.update((state) => ({
+      ...state,
+      projects: [project("p1"), project("p2")],
+      selectedProjectId: "p1",
+    }));
+    mocked.listSessions.mockResolvedValue({ sessions: [diskSession(REAL_PATH)], total: 1 });
+
+    actions.selectSession(REAL_PATH, "p2");
+
+    await vi.waitFor(() => {
+      expect(mocked.listSessions).toHaveBeenCalledWith(
+        "p2",
+        expect.objectContaining({ focus: REAL_PATH }),
+      );
+    });
+  });
+});
+
+/**
  * The sidebar's viewing preferences: how it groups what it draws, how it orders
  * the rows, and the manual arrangement a drag leaves behind. All three are
  * cached in `localStorage`, so these stand one up and read it back.

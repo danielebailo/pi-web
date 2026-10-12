@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, type RefObject } from "react";
-import { FolderIcon } from "../../components/icons.tsx";
-import { REFERENCE_SLOT, referenceSpans } from "./reference-token.ts";
+import { FileIcon, FolderIcon } from "../../components/icons.tsx";
+import { FILE_SIGIL, REFERENCE_SLOT, referenceSpans } from "./reference-token.ts";
 import styles from "./DraftMirror.module.css";
 
 /**
@@ -14,7 +14,7 @@ import styles from "./DraftMirror.module.css";
  * and the hero), and the textarea scrolls this one along with it.
  *
  * Nothing here changes a width. A chip colours its own characters and nothing
- * else, and the folder glyph is painted *over* the em space a drop wrote into
+ * else, and the glyph is painted *over* the em space an insertion wrote into
  * the text (`REFERENCE_SLOT`) rather than beside it. That is what keeps the
  * chip's icon at the same left edge as ordinary text — no card padding is
  * consumed by it, and no measurement decides where it goes. It also means the
@@ -22,7 +22,9 @@ import styles from "./DraftMirror.module.css";
  * mirror lays out exactly the characters the textarea does.
  *
  * A reference the user typed by hand has no slot, so it keeps its colour and
- * gets no glyph — there would be a letter under the icon.
+ * gets no glyph — there would be a letter under the icon. The glyph itself
+ * distinguishes the two kinds a chip can stand for: a folder, or a file (see
+ * `FILE_SIGIL`).
  */
 export function DraftMirror({ text, className, mirrorRef }: {
   text: string;
@@ -51,9 +53,10 @@ export function DraftMirror({ text, className, mirrorRef }: {
             key={`ref-${part.start}`}
             className={styles.reference}
             data-slot={part.slot || undefined}
+            data-file={part.file || undefined}
           >
             <span className={styles.referenceIcon}>
-              <FolderIcon width={14} height={14} />
+              {part.file ? <FileIcon width={14} height={14} /> : <FolderIcon width={14} height={14} />}
             </span>
             {part.value}
           </span>
@@ -62,10 +65,10 @@ export function DraftMirror({ text, className, mirrorRef }: {
   );
 }
 
-/** One run of the draft: plain text, or a folder reference by its range. */
+/** One run of the draft: plain text, or a reference by its range. */
 type Part =
   | { kind: "text"; at: number; value: string }
-  | { kind: "reference"; start: number; value: string; slot: boolean };
+  | { kind: "reference"; start: number; value: string; slot: boolean; file: boolean };
 
 function split(text: string): Part[] {
   const parts: Part[] = [];
@@ -74,11 +77,15 @@ function split(text: string): Part[] {
     if (span.start > cursor) {
       parts.push({ kind: "text", at: cursor, value: text.slice(cursor, span.start) });
     }
+    const slot = text.startsWith(REFERENCE_SLOT, span.start);
     parts.push({
       kind: "reference",
       start: span.start,
       value: text.slice(span.start, span.end),
-      slot: text.startsWith(REFERENCE_SLOT, span.start),
+      slot,
+      // A hand-typed reference has no slot and is always a folder path; only a
+      // chip can carry the sigil, and only a slot can carry a glyph.
+      file: slot && text.startsWith(FILE_SIGIL, span.start + REFERENCE_SLOT.length),
     });
     cursor = span.end;
   }

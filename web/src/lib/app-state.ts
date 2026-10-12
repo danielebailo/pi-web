@@ -313,6 +313,26 @@ function findSessionTitle(state: AppState, sessionPath: string): string | null {
   return null;
 }
 
+/**
+ * Which workspace owns a session path, as far as this client can tell.
+ *
+ * The session list is the only place the two are held together: it arrives per
+ * project, so a loaded page is the authoritative answer, and `unsavedSessions`
+ * names the owner of a row pi has not written to disk yet. A path in neither is
+ * a workspace whose page was never loaded, and the caller leaves the selection
+ * alone rather than decoding the path — see `unsavedSessions` for why that
+ * cannot be done on this side.
+ */
+function projectIdOfSession(state: AppState, sessionPath: string): string | null {
+  for (const [projectId, sessions] of Object.entries(state.sessions)) {
+    if (sessions.some((session) => session.path === sessionPath)) return projectId;
+  }
+  for (const [projectId, paths] of Object.entries(state.unsavedSessions)) {
+    if (paths.includes(sessionPath)) return projectId;
+  }
+  return null;
+}
+
 export function useT(): Translate {
   const preference = useStoreSelector(appStore, (state) => state.settings.language);
   return useMemo(() => translator(resolveLanguage(preference)), [preference]);
@@ -850,7 +870,25 @@ export const actions = {
     }
   },
 
-  selectSession(sessionPath: string | null): void {
+  /**
+   * Open a session, moving the selected workspace with it.
+   *
+   * The header names the selected project, and every per-project surface — the
+   * commands, the file paths a message is resolved against, the composer's
+   * defaults — is keyed on it. Opening a session that lives in another
+   * workspace therefore has to switch the workspace too; without that the
+   * transcript changes while the header keeps naming the last one.
+   *
+   * `projectId` is the caller's own knowledge of the owner (a sidebar row knows
+   * the workspace it was drawn under); left out, it is looked up from the
+   * sidebar's records. Either way the open session is the authority, so the
+   * workspace follows it rather than the other way around.
+   */
+  selectSession(sessionPath: string | null, projectId?: string): void {
+    const before = appStore.get();
+    const owner =
+      sessionPath === null ? null : (projectId ?? projectIdOfSession(before, sessionPath));
+    const changedWorkspace = owner !== null && owner !== before.selectedProjectId;
     appStore.update((state) => {
       // Opening a session is reading its result, so its completion reminder has
       // done its job. A running session keeps its mark.
@@ -861,6 +899,15 @@ export const actions = {
       return {
         ...state,
         selectedSessionPath: sessionPath,
+        // Same workspace when the owner is unknown: a session we cannot place is
+        // not a reason to move the selection somewhere arbitrary.
+        ...(owner === null ? {} : { selectedProjectId: owner }),
+        // A row in the sidebar sits under an expanded workspace, but a jump from
+        // a notification does not — revealing the owner keeps the now-open row
+        // visible rather than hidden behind a folded workspace.
+        ...(owner === null
+          ? {}
+          : { expandedProjects: { ...state.expandedProjects, [owner]: true } }),
         // Dropping the queued prompt here is what stops it from being delivered
         // to whatever session the user opens next.
         pendingPrompt: null,
@@ -871,6 +918,14 @@ export const actions = {
         sessionActivity,
       };
     });
+    // A workspace whose page was never loaded has no commands and no session
+    // label to name it in the header; asking for the page is the work expanding
+    // its row would have done, and `refreshSessions` skips it when the page is
+    // already held. Deliberately no prewarm: opening a session must not spawn a
+    // pi process for a workspace the user has only glanced at.
+    if (owner !== null && changedWorkspace && before.sessions[owner] === undefined) {
+      void actions.refreshSessions(owner);
+    }
   },
 
   /** Renames by writing pi's own `session_info` entry, so the CLI agrees. */
@@ -1099,13 +1154,17 @@ export const actions = {
   notifyTaskFinished(sessionPath: string): void {
     if (!appStore.get().settings.browserNotifications) return;
     const state = appStore.get();
+    // Resolved now rather than on click: the notice outlives this call (the page
+    // may even have reloaded), and a click that lands later still has to know
+    // which workspace to switch to along with the conversation.
+    const owner = projectIdOfSession(state, sessionPath);
     showNotification(
       findSessionTitle(state, sessionPath) ?? "pi-web-simple",
       tr()("notification.taskFinished"),
       sessionPath,
       () => {
         // Opening the session is the useful answer to "which one finished?".
-        actions.selectSession(sessionPath);
+        actions.selectSession(sessionPath, owner ?? undefined);
       },
     );
   },

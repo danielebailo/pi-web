@@ -1,8 +1,8 @@
 /*
- * The context ring sits between the model name and the send button, so it is
- * sized like the other toolbar affordances rather than like the 34px send
- * circle: a 30px hit area around a 16px glyph, which is what dsh's ring reads
- * as next to a full-size button.
+ * The context chip sits between the model chip and the send button, so it wears
+ * that trigger's metrics — same padding, radius and type — rather than the 34px
+ * send disc's: the two controls describe the same session and are read together,
+ * and a chip that matched the disc would read as a button rather than a setting.
  */
 
 .anchor {
@@ -14,12 +14,15 @@
 .button {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  corner-shape: round;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 8px;
   color: var(--dsw-alias-label-secondary);
+  font-size: 12.5px;
+  line-height: 18px;
+  /* The reading is a figure that changes a character at a time (12% → 13%);
+   * tabular digits stop the chip from twitching as it does. */
+  font-variant-numeric: tabular-nums;
 }
 
 .button:hover,
@@ -44,11 +47,18 @@
  * 75% is "start thinking about compaction", 90% is "the next long turn will
  * trigger it". Neither is a pi concept — pi's own compaction threshold is
  * configurable — so these are display only and the panel always states the
- * real numbers. */
-.ringWarning {
+ * real numbers. The rules sit after the hover pair so the tone survives a
+ * hover instead of being washed back to the primary label ink. And they are
+ * stated on the button, not on the svg: the ring draws in `currentColor`, so
+ * one class colors the arc and the percentage together. */
+.ringWarning,
+.ringWarning:hover,
+.ringWarning[aria-expanded="true"] {
   color: var(--dsw-alias-state-warn-primary);
 }
 
-.ringCritical {
+.ringCritical,
+.ringCritical:hover,
+.ringCritical[aria-expanded="true"] {
   color: var(--dsw-alias-state-error-primary);
 }

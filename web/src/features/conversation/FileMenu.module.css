@@ -1,0 +1,32 @@
+/*
+ * Rows of the `@` file menu. The card they sit in is `Menu.module.css`, which
+ * the `/` command menu shares; only what a row says about a path lives here.
+ */
+
+.icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* The name the query reached. Capped so a deep path's directory cannot push it
+ * out of view — the name is the part the user was typing. */
+.name {
+  flex: none;
+  max-width: 55%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The directory the name lives in, which is what tells two `index.ts` apart.
+ * Truncated from the right, so the nearest segment survives. */
+.directory {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--dsw-alias-label-tertiary);
+}

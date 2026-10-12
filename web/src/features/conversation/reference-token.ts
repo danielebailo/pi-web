@@ -44,6 +44,29 @@ export interface ReferenceSpan {
 export const REFERENCE_SLOT = "\u2003 ";
 
 /**
+ * The sigil that marks a *file* reference.
+ *
+ * A folder reference is the path itself (`alpha/`) and reads as one; a file
+ * reference carries `@`, the same character the completion is triggered by. It
+ * is drawn by the mirror and expanded on send, so the sentence the user reads
+ * and the sentence pi receives both say which word was a reference rather than
+ * a file that happens to share a name.
+ */
+export const FILE_SIGIL = "@";
+
+/**
+ * Characters a token may follow to have a boundary in front of it: the draft's
+ * own start, whitespace, an opening bracket or quote, and the CJK punctuation
+ * that ends a clause without a space.
+ *
+ * Spelled out rather than written as `\s` because the em space in
+ * `REFERENCE_SLOT` is whitespace to a regex: a caret placed inside a chip sits
+ * right after an em space, and a `@` found there must not read as the start of
+ * a new token.
+ */
+export const TOKEN_OPENER = /[ \t\n\r([{"'「『（【《，。；：！？、]/;
+
+/**
  * A run of non-space characters ending in a separator, at the draft start or
  * after whitespace — dsh's folder-token shape, minus its `@`. Two boundaries
  * do the work the sigil used to: the leading one keeps a slash inside a word
@@ -58,8 +81,19 @@ const REFERENCE_RE = /(^|\s)([^\s"]+\/)(?=\s|$)/g;
  * boundary, because the user may keep typing straight into the name
  * (`alpha/x`). Nothing hand-typed can look like this: the slot is an em space,
  * which no one types as part of a path.
+ *
+ * The lookahead keeps the two slot forms apart: a file reference is a slot
+ * followed by the sigil, and without it `@api/` would be read as a folder
+ * reference whose label happens to begin with `@`.
  */
-const SLOTTED_RE = new RegExp(`${REFERENCE_SLOT}([^\\s"]+\\/)`, "g");
+const SLOTTED_RE = new RegExp(`${REFERENCE_SLOT}(?!@)([^\\s"]+\\/)`, "g");
+
+/**
+ * A *file* reference a completion wrote: the slot, the sigil, then the label —
+ * quoted when the label itself has a space in it, which is the one case where
+ * the token cannot simply end at whitespace.
+ */
+const SLOTTED_FILE_RE = new RegExp(`${REFERENCE_SLOT}\\${FILE_SIGIL}("[^"]+"|[^\\s"]+)`, "g");
 
 /**
  * Every folder reference in a draft, in draft order.
@@ -73,13 +107,20 @@ const SLOTTED_RE = new RegExp(`${REFERENCE_SLOT}([^\\s"]+\\/)`, "g");
  */
 export function referenceSpans(text: string): ReferenceSpan[] {
   const spans: ReferenceSpan[] = [];
-  SLOTTED_RE.lastIndex = 0;
-  let slotted: RegExpExecArray | null;
-  while ((slotted = SLOTTED_RE.exec(text)) !== null) {
-    const token = slotted[1] ?? "";
-    if (token.includes("://")) continue;
-    spans.push({ start: slotted.index, end: slotted.index + slotted[0].length });
+
+  // Both slot forms, which are written by an insertion rather than typed and
+  // therefore hold wherever they are found. A file reference and a folder one
+  // cannot overlap: the lookahead above sends `@…` to this pass only.
+  for (const pattern of [SLOTTED_RE, SLOTTED_FILE_RE]) {
+    pattern.lastIndex = 0;
+    let slotted: RegExpExecArray | null;
+    while ((slotted = pattern.exec(text)) !== null) {
+      const token = slotted[1] ?? "";
+      if (token.includes("://")) continue;
+      spans.push({ start: slotted.index, end: slotted.index + slotted[0].length });
+    }
   }
+
   REFERENCE_RE.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = REFERENCE_RE.exec(text)) !== null) {
@@ -107,20 +148,118 @@ export function referenceInsertion(
   end: number,
   reference: string,
 ): { text: string; caret: number } {
-  const token = withTrailingSlash(reference);
+  return slotInsertion(text, start, end, withTrailingSlash(reference));
+}
+
+/**
+ * Put one *file* reference (a `token` already carrying its sigil) at the caret.
+ *
+ * The same insertion as a folder drop's, minus the trailing separator a folder
+ * needs: the token was built by `fileToken` and is inserted exactly as spelled.
+ */
+export function fileReferenceInsertion(
+  text: string,
+  start: number,
+  end: number,
+  token: string,
+): { text: string; caret: number } {
+  return slotInsertion(text, start, end, token);
+}
+
+/**
+ * Write a chip at the caret, replacing whatever the textarea had selected.
+ *
+ * Whitespace is added on whichever side needs it so the token keeps the leading
+ * boundary `referenceSpans` requires and does not glue onto the next word; at
+ * the draft's own edges nothing is added, because a leading space would be a
+ * change the user did not make.
+ * @returns the new draft and where the caret belongs in it.
+ */
+function slotInsertion(
+  text: string,
+  start: number,
+  end: number,
+  token: string,
+): { text: string; caret: number } {
   const before = text.slice(0, start);
   const after = text.slice(end);
-  const lead = before === "" || /\s$/.test(before) ? "" : " ";
+  // A bracket or a quote is already a boundary, so no space is added in front
+  // of a chip that opens inside one — `(@api.ts` stays as the user wrote it.
+  const lead = before === "" || TOKEN_OPENER.test(before.slice(-1)) ? "" : " ";
   // A chip always ends with a space, the way dsh's does — its insertion reuses
   // a space that is already there and adds one that is not. The caret lands
   // after it, so whatever is typed next starts a word instead of running into
-  // the path.
+  // the label.
   const tail = /^\s/.test(after) ? "" : " ";
   const inserted = `${REFERENCE_SLOT}${token}`;
   return {
     text: `${before}${lead}${inserted}${tail}${after}`,
     caret: start + lead.length + inserted.length + tail.length,
   };
+}
+
+/**
+ * The label a chip token stands for: the token without its sigil and without
+ * the quotes a label with spaces is written in.
+ *
+ * Used to compare tokens against the labels a mint would produce — a folder's
+ * `alpha/` against a label, a file's `@api.ts` against the name `api.ts` — so a
+ * chip never collides with a reference already in the draft.
+ */
+export function tokenLabel(token: string): string {
+  const body = token.startsWith(FILE_SIGIL) ? token.slice(FILE_SIGIL.length) : token;
+  if (body.length >= 2 && body.startsWith('"') && body.endsWith('"')) return body.slice(1, -1);
+  return body;
+}
+
+/**
+ * The token a file reference is spelled with: the sigil and the label, quoted
+ * when the label contains a space or a quote.
+ *
+ * Quoting is the same answer the TUI's completion gives for the same reason: a
+ * path is written inside a sentence, and a sentence ends a word at whitespace.
+ */
+export function fileToken(label: string): string {
+  return needsQuotes(label) ? `${FILE_SIGIL}"${label}"` : `${FILE_SIGIL}${label}`;
+}
+
+/** Whether a path has to be quoted to survive being written in a sentence. */
+export function needsQuotes(path: string): boolean {
+  return /[\s"']/.test(path);
+}
+
+/**
+ * Where an insertion should start replacing.
+ *
+ * A completion's token begins at its `@`, but a chip standing there already
+ * owns the glyph slot in front of that sigil — so a pick that narrows an
+ * existing reference has to take the slot with it, or the draft keeps the old
+ * one and grows an orphan glyph. Hand-typed text has no slot, and the `at`
+ * index is then returned unchanged.
+ */
+export function referenceStartAt(value: string, at: number): number {
+  if (at < REFERENCE_SLOT.length) return at;
+  return value.startsWith(REFERENCE_SLOT, at - REFERENCE_SLOT.length)
+    ? at - REFERENCE_SLOT.length
+    : at;
+}
+
+/**
+ * The shortest tail of a *file* path that nothing else already spells.
+ *
+ * The same walk outward as `referenceLabel`, minus the trailing separator: a
+ * file reference reads as its own name (`api.ts`), and only a second file of
+ * the same name makes the label grow a directory.
+ */
+export function fileLabel(path: string, taken: ReadonlySet<string>): string {
+  const trimmed = path.replace(/[/\\]+$/, "");
+  const segments = trimmed.split(/[/\\]+/).filter((segment) => segment.length > 0);
+  if (segments.length === 0) return path;
+  for (let take = 1; take <= segments.length; take += 1) {
+    const label = segments.slice(-take).join("/");
+    if (!taken.has(label)) return label;
+  }
+  return trimmed;
 }
 
 /**
@@ -213,10 +352,10 @@ export function expandReferences(
     let cursor = 0;
     for (const span of referenceSpans(text)) {
       const raw = text.slice(span.start, span.end);
-      const label = raw.startsWith(REFERENCE_SLOT) ? raw.slice(REFERENCE_SLOT.length) : raw;
-      const path = references.get(label);
+      const token = raw.startsWith(REFERENCE_SLOT) ? raw.slice(REFERENCE_SLOT.length) : raw;
+      const path = references.get(token);
       if (path === undefined) continue;
-      out += text.slice(cursor, span.start) + path;
+      out += text.slice(cursor, span.start) + expandToken(token, path);
       cursor = span.end;
     }
     if (cursor > 0) out += text.slice(cursor);
@@ -225,6 +364,19 @@ export function expandReferences(
   // A slot whose label was edited away no longer stands for anything, and the
   // whitespace it holds must not ride into the message.
   return out.includes(REFERENCE_SLOT) ? out.split(REFERENCE_SLOT).join("") : out;
+}
+
+/**
+ * What one reference becomes in the sentence that is sent.
+ *
+ * A folder reference is its path. A file reference keeps the sigil, because
+ * that is what makes the pointer read as a pointer — and writes the path quoted
+ * when the path itself contains a space, so the sentence pi receives still has
+ * one unambiguous reference in it rather than two words where a path was.
+ */
+function expandToken(token: string, target: string): string {
+  if (!token.startsWith(FILE_SIGIL)) return target;
+  return needsQuotes(target) ? `${FILE_SIGIL}"${target}"` : `${FILE_SIGIL}${target}`;
 }
 
 /**

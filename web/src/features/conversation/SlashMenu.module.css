@@ -1,27 +1,7 @@
-.menu {
-  position: absolute;
-  bottom: calc(100% + 4px);
-  left: 0;
-  right: 0;
-  z-index: 20;
-  max-height: 320px;
-  padding: 4px;
-  border-radius: 20px;
-  background: var(--dsw-specific-menu);
-  box-shadow: var(--dsw-elevation-float);
-  /* The menu itself never scrolls — the viewport does. That keeps the rounded
-   * corners clean and stops the rows from being squeezed by max-height. */
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-.viewport {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow-y: auto;
-}
+/*
+ * Rows of the `/` command menu. The card they sit in is `Menu.module.css`,
+ * which the `@` file menu shares.
+ */
 
 /* Section heading, e.g. 技能. */
 .sectionTitle {
@@ -36,25 +16,6 @@
 
 .sectionTitle:not(:first-child) {
   margin-top: 4px;
-}
-
-.item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  flex: none;
-  min-height: 40px;
-  padding: 8px 10px;
-  border-radius: 10px;
-  text-align: left;
-  font-size: 14px;
-  line-height: 22px;
-  color: var(--dsw-alias-label-primary);
-}
-
-.itemActive {
-  background: var(--dsw-alias-interactive-bg-hover);
 }
 
 /* Name keeps its intrinsic width up to 40%; the description takes the rest
@@ -73,11 +34,5 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--dsw-alias-label-tertiary);
-}
-
-.empty {
-  padding: 8px 10px;
-  font-size: 12px;
   color: var(--dsw-alias-label-tertiary);
 }

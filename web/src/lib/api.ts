@@ -4,6 +4,7 @@ import type {
   ComposerState,
   DirListing,
   ExtensionsView,
+  FileSearchResult,
   ForkPoint,
   ForkResult,
   GitFileEntry,
@@ -100,6 +101,19 @@ export const api = {
   listWorkspaceFiles: (projectId: string, path: string) =>
     request<WorkspaceListing>(
       `/api/projects/${encodeURIComponent(projectId)}/files${path ? `?path=${encodeURIComponent(path)}` : ""}`,
+    ),
+
+  /**
+   * Paths under a project matching an in-progress `@` query.
+   *
+   * A flat search over the whole project rather than a level-by-level walk: the
+   * user types a name (`@useComposer`), and the menu has to fill from one
+   * keystroke. The server indexes with `git ls-files` where it can, so ignored
+   * files are not offered — the same set the agent itself would find.
+   */
+  searchProjectFiles: (projectId: string, query: string) =>
+    request<FileSearchResult>(
+      `/api/projects/${encodeURIComponent(projectId)}/files/search?q=${encodeURIComponent(query)}`,
     ),
 
   /** One file's content, for the right sidebar's preview tab. */

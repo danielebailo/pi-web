@@ -15,9 +15,11 @@ import { DraftMirror } from "./DraftMirror.tsx";
 import { useReferenceDraft } from "./useReferenceDraft.ts";
 import { ModelThinkingPicker } from "./ModelThinkingPicker.tsx";
 import { SlashMenu } from "./SlashMenu.tsx";
+import { FileMenu } from "./FileMenu.tsx";
 import { useComposerState } from "./useComposerState.ts";
 import { useImageDraft } from "./useImageDraft.ts";
 import { useSlashCompletion } from "./useSlashCompletion.ts";
+import { useFileCompletion } from "./useFileCompletion.ts";
 import styles from "./NewSessionHero.module.css";
 
 /** Workspace chooser shown above the composer. */
@@ -149,6 +151,12 @@ export function NewSessionHero() {
     state.selectedProjectId ? (state.commands[state.selectedProjectId] ?? []) : []
   ).filter((command) => command.source !== "builtin");
   const completion = useSlashCompletion({ setText, textareaRef, commands });
+  /** The `@` menu, searching the project the first message will be sent in. */
+  const fileCompletion = useFileCompletion({
+    textareaRef,
+    projectId: state.selectedProjectId,
+    insertReference: reference.insertReference,
+  });
 
   useEffect(() => {
     textareaRef.current?.focus();
@@ -169,6 +177,11 @@ export function NewSessionHero() {
     if ((message.length === 0 && attachments.length === 0) || !project) return;
     setText("");
     draft.clear();
+    // The same rule as the conversation composer's `submit`: a send ends the
+    // token the menu was built from, and clearing the draft is a write the menu
+    // cannot hear. This path happens to unmount the hero a moment later, but the
+    // rule belongs to the send rather than to that accident.
+    completion.close();
     // The labels go with the draft: this message is already made, and nothing
     // can put it back into this card.
     const outgoing = reference.expand(message);
@@ -187,9 +200,10 @@ export function NewSessionHero() {
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
-    // While the command menu is open it owns the arrow keys, Enter/Tab and
-    // Escape, so Enter completes a command instead of starting a session.
+    // While a completion menu is open it owns the arrow keys, Enter/Tab and
+    // Escape, so Enter completes a candidate instead of starting a session.
     if (completion.onKeyDown(event)) return;
+    if (fileCompletion.onKeyDown(event)) return;
 
     // A reference is one thing to the caret, not a run of characters: one
     // keystroke takes the whole chip (see `referenceAtCaret`).
@@ -200,6 +214,7 @@ export function NewSessionHero() {
     ) {
       event.preventDefault();
       completion.sync();
+      fileCompletion.sync();
       return;
     }
 
@@ -238,6 +253,16 @@ export function NewSessionHero() {
               onHighlight={completion.setHighlight}
               onSelect={completion.select}
             />
+          ) : fileCompletion.open ? (
+            <FileMenu
+              matches={fileCompletion.matches}
+              loading={fileCompletion.loading}
+              error={fileCompletion.error}
+              indexed={fileCompletion.indexed}
+              highlight={fileCompletion.highlight}
+              onHighlight={fileCompletion.setHighlight}
+              onSelect={fileCompletion.select}
+            />
           ) : null}
 
           <AttachmentStrip
@@ -260,9 +285,16 @@ export function NewSessionHero() {
               onChange={(event) => {
                 setText(event.target.value);
                 completion.sync();
+                fileCompletion.sync();
               }}
-              onKeyUp={() => completion.sync()}
-              onClick={() => completion.sync()}
+              onKeyUp={() => {
+                completion.sync();
+                fileCompletion.sync();
+              }}
+              onClick={() => {
+                completion.sync();
+                fileCompletion.sync();
+              }}
               onKeyDown={onKeyDown}
               onPaste={draft.onPaste}
               onScroll={(event) => {

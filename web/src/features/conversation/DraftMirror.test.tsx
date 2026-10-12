@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { DraftMirror } from "./DraftMirror.tsx";
-import { REFERENCE_SLOT } from "./reference-token.ts";
+import { fileToken, REFERENCE_SLOT } from "./reference-token.ts";
 
 const html = (text: string): string => renderToStaticMarkup(<DraftMirror text={text} />);
 
@@ -42,5 +42,10 @@ describe("DraftMirror", () => {
 
   it("leaves a hand-typed reference without a glyph slot", () => {
     expect(html("see alpha/ then")).not.toContain("data-slot");
+  });
+
+  it("marks a file chip, which wears a different glyph than a folder's", () => {
+    expect(html(`${REFERENCE_SLOT}${fileToken("api.ts")} then`)).toContain("data-file");
+    expect(html(`${REFERENCE_SLOT}src/ then`)).not.toContain("data-file");
   });
 });

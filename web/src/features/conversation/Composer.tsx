@@ -14,9 +14,11 @@ import { useReferenceDraft } from "./useReferenceDraft.ts";
 import { ContextMeter } from "./ContextMeter.tsx";
 import { ModelThinkingPicker } from "./ModelThinkingPicker.tsx";
 import { SlashMenu } from "./SlashMenu.tsx";
+import { FileMenu } from "./FileMenu.tsx";
 import { useSlashCompletion } from "./useSlashCompletion.ts";
+import { useFileCompletion } from "./useFileCompletion.ts";
 import styles from "./Composer.module.css";
-import { useT } from "../../lib/app-state.ts";
+import { appStore, useT } from "../../lib/app-state.ts";
 import { isCoarsePointer } from "../../lib/pointer.ts";
 import { useStoreSelector } from "../../lib/store.ts";
 import { isNarrow } from "../../layout/columns.ts";
@@ -111,6 +113,12 @@ export function Composer({
   // the room there actually is. Subscribed to the width alone so a column
   // resize re-renders the card only when the breakpoint is what moved.
   const narrow = isNarrow(useStoreSelector(layoutStore, (state) => state.viewportWidth));
+  /**
+   * The project whose files `@` completion searches. Read from the store rather
+   * than taken as a prop: the shell already knows which project is open, and
+   * the session this card belongs to is inside it.
+   */
+  const projectId = useStoreSelector(appStore, (state) => state.selectedProjectId);
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -121,6 +129,14 @@ export function Composer({
   const draft = useImageDraft(reference);
 
   const completion = useSlashCompletion({ setText, textareaRef, commands });
+  /** The `@` menu. Both completions read the same textarea; the two tokens
+   * cannot collide, because each needs a different character at the point the
+   * other one is already consuming. */
+  const fileCompletion = useFileCompletion({
+    textareaRef,
+    projectId,
+    insertReference: reference.insertReference,
+  });
 
   // Layout, not passive. `height: auto` is what lets the box shrink to one line
   // before the new height is measured, and measured after paint that one-line
@@ -145,6 +161,13 @@ export function Composer({
     // this very text back, and it has to keep meaning what it meant.
     setText("");
     draft.clear();
+    // Both menus describe a token in the draft that has just been sent. Clearing
+    // the box is a programmatic write, so no `input` event reaches them and
+    // `sync()` never hears about it: left alone they stay open over the
+    // transcript, covering whatever landed there last — including the row a
+    // `/compact` just put at the bottom.
+    completion.close();
+    fileCompletion.close();
     const choice = override ?? busySendBehavior;
     const ok = await onSend(
       reference.expand(message),
@@ -165,9 +188,13 @@ export function Composer({
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
-    // While the command menu is open it owns the arrow keys, Enter/Tab and
-    // Escape, so Enter completes a command instead of sending the message.
+    // While a completion menu is open it owns the arrow keys, Enter/Tab and
+    // Escape, so Enter completes a candidate instead of sending the message.
+    // Only one of the two can be open at a time — they are triggered by
+    // different characters — and the `/` menu is asked first only so the order
+    // is written down rather than implied.
     if (completion.onKeyDown(event)) return;
+    if (fileCompletion.onKeyDown(event)) return;
 
     // A reference is one thing to the caret, not a run of characters: one
     // keystroke takes the whole chip (see `referenceAtCaret`).
@@ -178,6 +205,7 @@ export function Composer({
     ) {
       event.preventDefault();
       completion.sync();
+      fileCompletion.sync();
       return;
     }
 
@@ -221,6 +249,16 @@ export function Composer({
             onHighlight={completion.setHighlight}
             onSelect={completion.select}
           />
+        ) : fileCompletion.open ? (
+          <FileMenu
+            matches={fileCompletion.matches}
+            loading={fileCompletion.loading}
+            error={fileCompletion.error}
+            indexed={fileCompletion.indexed}
+            highlight={fileCompletion.highlight}
+            onHighlight={fileCompletion.setHighlight}
+            onSelect={fileCompletion.select}
+          />
         ) : null}
 
         <AttachmentStrip
@@ -249,9 +287,16 @@ export function Composer({
             onChange={(event) => {
               setText(event.target.value);
               completion.sync();
+              fileCompletion.sync();
             }}
-            onKeyUp={() => completion.sync()}
-            onClick={() => completion.sync()}
+            onKeyUp={() => {
+              completion.sync();
+              fileCompletion.sync();
+            }}
+            onClick={() => {
+              completion.sync();
+              fileCompletion.sync();
+            }}
             onKeyDown={onKeyDown}
             onPaste={draft.onPaste}
             onScroll={(event) => {

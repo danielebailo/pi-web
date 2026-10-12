@@ -22,11 +22,13 @@ export interface ContextMeterProps {
 }
 
 /**
- * How full the context window is, as a ring next to the send button.
+ * How full the context window is, as a chip next to the send button: the ring
+ * and the percentage it stands for, in the same shape as the model trigger a
+ * few pixels to its left.
  *
- * The ring is a progress arc rather than a number because it sits in a toolbar
- * where horizontal space is contested: the figure itself is one click away in the
- * panel, and the shape answers "am I near the limit?" without being read.
+ * The ring answers "am I near the limit?" without being read, and the figure
+ * says by how much — one glance, no click. The full breakdown (used, window,
+ * remaining) stays in the panel behind it.
  *
  * A ring with no arc is the honest rendering of "unknown" — pi reports a null
  * token count right after a compaction, and a session read from disk may have no
@@ -63,6 +65,8 @@ export function ContextMeter({ context, onRequestLive }: ContextMeterProps) {
         <button
           type="button"
           className={styles.button}
+          aria-haspopup="dialog"
+          aria-expanded={open}
           aria-label={t("context.unknown")}
           title={t("context.unknown")}
           onClick={() => {
@@ -72,6 +76,7 @@ export function ContextMeter({ context, onRequestLive }: ContextMeterProps) {
           }}
         >
           <Ring percent={null} />
+          <span>{t("context.unknownValue")}</span>
         </button>
         {open ? (
           <StatPanel align="end" icon={<Ring percent={null} />} title={t("context.title")} note={t("context.emptyNote")}>
@@ -83,6 +88,10 @@ export function ContextMeter({ context, onRequestLive }: ContextMeterProps) {
   }
 
   const percent = context.percent;
+  // `tokens === null` is pi saying it has no figure yet (right after a
+  // compaction); `percent === null` is the same absence one step later — a
+  // window too small or too unknown to divide by. Either one is "unknown",
+  // and every expression below states it inline so the narrowing holds.
   const label =
     percent === null || context.tokens === null
       ? t("context.unknown")
@@ -91,12 +100,22 @@ export function ContextMeter({ context, onRequestLive }: ContextMeterProps) {
           used: formatTokens(context.tokens),
           window: formatTokens(context.contextWindow),
         });
+  // The chip wears the same two thresholds the ring does, so the reading and
+  // the arc never disagree about how close the window is to compacting.
+  const tone =
+    percent === null || context.tokens === null
+      ? undefined
+      : percent >= 90
+        ? styles.ringCritical
+        : percent >= 75
+          ? styles.ringWarning
+          : undefined;
 
   return (
     <span className={styles.anchor} ref={rootRef}>
       <button
         type="button"
-        className={styles.button}
+        className={clsx(styles.button, tone)}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={label}
@@ -108,11 +127,20 @@ export function ContextMeter({ context, onRequestLive }: ContextMeterProps) {
         }}
       >
         <Ring percent={percent} />
+        <span>
+          {percent === null || context.tokens === null
+            ? t("context.unknownValue")
+            : `${formatPercent(percent)}%`}
+        </span>
       </button>
       {open ? (
         <StatPanel
           align="end"
-          icon={<Ring percent={percent} />}
+          icon={
+            <span className={tone}>
+              <Ring percent={percent} />
+            </span>
+          }
           title={t("context.title")}
           value={
             context.tokens === null
@@ -159,15 +187,14 @@ function formatPercent(percent: number): string {
 
 /**
  * The ring itself. `percent === null` draws the track only, which is how "no
- * figure" looks: an empty gauge, not a full one.
+ * figure" looks: an empty gauge, not a full one. Its color is the chip's own
+ * (`currentColor`), so the warning tones are stated once, on the button.
  */
 function Ring({ percent }: { percent: number | null }) {
   const shown = percent === null ? 0 : Math.min(100, Math.max(0, percent));
-  const tone =
-    shown >= 90 ? styles.ringCritical : shown >= 75 ? styles.ringWarning : undefined;
   return (
     <svg
-      className={clsx(styles.ring, tone)}
+      className={styles.ring}
       width={16}
       height={16}
       viewBox="0 0 16 16"

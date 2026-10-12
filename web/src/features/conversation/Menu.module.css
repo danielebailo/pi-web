@@ -1,0 +1,60 @@
+/*
+ * The shell both completion menus hang in: `/` commands and `@` files.
+ *
+ * Shared rather than duplicated because the two are one surface seen twice —
+ * the same card, in the same place above the input, opening on the same
+ * keystrokes. Only the rows differ, and those live beside each menu (`SlashMenu`
+ * for its section headings, `FileMenu` for a path's name and directory).
+ *
+ * The menu itself never scrolls — the viewport does. That keeps the rounded
+ * corners clean and stops the rows from being squeezed by `max-height`.
+ */
+.menu {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  max-height: 320px;
+  padding: 4px;
+  border-radius: 20px;
+  background: var(--dsw-specific-menu);
+  box-shadow: var(--dsw-elevation-float);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.viewport {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  flex: none;
+  min-height: 40px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  text-align: left;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.itemActive {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* A menu with nothing to show still has something to say: "loading" and "no
+ * match" are different answers, and an empty card would say neither. */
+.empty {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+}

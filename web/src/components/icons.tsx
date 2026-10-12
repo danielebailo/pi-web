@@ -55,6 +55,20 @@ export const FolderIcon = (props: SVGProps<SVGSVGElement>) => (
 );
 
 /**
+ * A sheet of paper with a folded corner, for a file row in the `@` menu.
+ *
+ * Drawn as the folder's counterpart rather than as a different silhouette: the
+ * two sit in the same column of the same list, so a row's kind has to be
+ * readable from the outline alone at 14px.
+ */
+export const FileIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg {...base(props)}>
+    <path d="M4 2.5A1.5 1.5 0 0 1 5.5 1h3.7L13 4.8v8.7A1.5 1.5 0 0 1 11.5 15h-6A1.5 1.5 0 0 1 4 13.5z" />
+    <path d="M9.2 1v3.9H13" />
+  </svg>
+);
+
+/**
  * dsh's `IconFolderCloseRegular` (its `FolderCloseArtwork`, 1px stroke) — the
  * closed folder the hero's workspace chip wears before a workspace is chosen.
  *

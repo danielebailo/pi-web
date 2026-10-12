@@ -1,13 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   expandReferences,
+  fileLabel,
+  fileReferenceInsertion,
+  fileToken,
   REFERENCE_SLOT,
   referenceAtCaret,
   referenceInsertion,
   referenceLabel,
   referenceLabelFor,
   referenceSpans,
+  referenceStartAt,
   relativeReference,
+  tokenLabel,
   withTrailingSlash,
 } from "./reference-token.ts";
 
@@ -254,5 +259,108 @@ describe("relativeReference", () => {
 
   it("keeps the path when there is no workspace", () => {
     expect(relativeReference("/Users/dev/proj", null)).toBe("/Users/dev/proj");
+  });
+});
+
+describe("file references", () => {
+  /** The chip an insertion for `label` writes into a draft. */
+  const chip = (label: string): string => `${REFERENCE_SLOT}${fileToken(label)}`;
+
+  describe("spans", () => {
+    it("covers the sigil and the label", () => {
+      expect(tokens(`${chip("api.ts")} now`)).toEqual([`${REFERENCE_SLOT}@api.ts`]);
+    });
+
+    it("reads a directory token, separator and all", () => {
+      expect(tokens(`${chip("src/lib/")} now`)).toEqual([`${REFERENCE_SLOT}@src/lib/`]);
+    });
+
+    it("keeps a quoted label whole, spaces included", () => {
+      expect(tokens(`${chip("my file.ts")} now`)).toEqual([`${REFERENCE_SLOT}@"my file.ts"`]);
+    });
+
+    it("does not read a hand-typed sigil as a reference", () => {
+      // Only an insertion writes the slot, so a `@` the user typed stays prose
+      // and travels as written.
+      expect(tokens("look at @api.ts now")).toEqual([]);
+    });
+
+    it("tells a file token apart from a folder one", () => {
+      expect(tokens(`${chip("api/")} and ${chip("api.ts")}`)).toEqual([
+        `${REFERENCE_SLOT}@api/`,
+        `${REFERENCE_SLOT}@api.ts`,
+      ]);
+    });
+  });
+
+  describe("minting a label", () => {
+    it("reads a file as its own name", () => {
+      expect(fileLabel("src/lib/api.ts", new Set())).toBe("api.ts");
+    });
+
+    it("grows a directory when the name is taken", () => {
+      expect(fileLabel("src/lib/api.ts", new Set(["api.ts"]))).toBe("lib/api.ts");
+    });
+
+    it("spells a token with its sigil, quoted when it must be", () => {
+      expect(fileToken("api.ts")).toBe("@api.ts");
+      expect(fileToken("my file.ts")).toBe('@"my file.ts"');
+    });
+
+    it("reads a token back to the label it stands for", () => {
+      expect(tokenLabel("@api.ts")).toBe("api.ts");
+      expect(tokenLabel('@"my file.ts"')).toBe("my file.ts");
+      expect(tokenLabel("src/")).toBe("src/");
+    });
+  });
+
+  describe("insertion", () => {
+    it("replaces the half-typed query and leaves a trailing space", () => {
+      expect(fileReferenceInsertion("see @api", 4, 8, fileToken("api.ts"))).toEqual({
+        text: `see ${REFERENCE_SLOT}@api.ts `,
+        caret: 4 + REFERENCE_SLOT.length + "@api.ts".length + 1,
+      });
+    });
+
+    it("does not add a space after an opening bracket", () => {
+      expect(fileReferenceInsertion("(", 1, 1, fileToken("api.ts")).text).toBe(
+        `(${REFERENCE_SLOT}@api.ts `,
+      );
+    });
+
+    it("takes the chip's glyph slot when a pick narrows an existing chip", () => {
+      const drafted = `see ${REFERENCE_SLOT}@src/lib`;
+      const at = drafted.indexOf("@");
+      expect(referenceStartAt(drafted, at)).toBe(at - REFERENCE_SLOT.length);
+    });
+
+    it("starts at the sigil when there was no chip there before", () => {
+      expect(referenceStartAt("see @src", 4)).toBe(4);
+      expect(referenceStartAt("@", 0)).toBe(0);
+    });
+  });
+
+  describe("expanding", () => {
+    it("puts the sigil and the path back", () => {
+      const references = new Map([["@api.ts", "src/lib/api.ts"]]);
+      expect(expandReferences(`see ${chip("api.ts")} now`, references)).toBe(
+        "see @src/lib/api.ts now",
+      );
+    });
+
+    it("quotes a path that has a space in it", () => {
+      const references = new Map([['@"my file.ts"', "src/my file.ts"]]);
+      expect(expandReferences(chip(`my file.ts`), references)).toBe('@"src/my file.ts"');
+    });
+
+    it("keeps a folder reference spelled as a path, with no sigil", () => {
+      const references = new Map([
+        ["alpha/", "/tmp/pw-probe/alpha/"],
+        ["@api.ts", "src/api.ts"],
+      ]);
+      expect(expandReferences(`${REFERENCE_SLOT}alpha/ ${chip("api.ts")}`, references)).toBe(
+        "/tmp/pw-probe/alpha/ @src/api.ts",
+      );
+    });
   });
 });
