@@ -153,4 +153,21 @@ describe("groupTurns", () => {
     const turns = groupTurns([user("run it"), toolOnly]);
     expect(turns[0]!.response).toBe("");
   });
+
+  it("does not cut a turn at a compaction checkpoint", () => {
+    // The checkpoint is a message in the transcript, and `MessageList` renders
+    // it above the turns. Here it has to stay invisible: giving it a turn of its
+    // own would renumber every prompt below it and add a mark to the rail for
+    // something the user never sent.
+    const checkpoint = {
+      role: "compactionSummary",
+      summary: "what came before",
+      tokensBefore: 100,
+      timestamp: 0,
+    } as AgentMessage;
+    const turns = groupTurns([checkpoint, user("after the cut"), assistant("ok")]);
+    expect(turns.map((turn) => turn.turn)).toEqual([1]);
+    expect(turns[0]!.prompt).toBe("after the cut");
+    expect(turns[0]!.messages).not.toContain(checkpoint);
+  });
 });

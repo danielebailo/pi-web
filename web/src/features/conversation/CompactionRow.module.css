@@ -1,0 +1,104 @@
+/*
+ * The compaction row. The header is `DisclosureRow`, so only what is specific to
+ * this checkpoint lives here: the size beside the title, the timestamp pushed to
+ * the far edge, and the summary body — a document, not the pre-wrapped text a
+ * reasoning block holds.
+ */
+
+/* The same 2px dot the reasoning and process rows use as the separator between
+   a label and its summary. */
+.separator {
+  background: var(--dsw-alias-label-caption);
+  border-radius: 1px;
+  flex: none;
+  width: 2px;
+  height: 2px;
+  margin: 0 8px;
+}
+
+.size {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: calc(24px + var(--dsh-content-font-delta, 0px));
+  white-space: nowrap;
+}
+
+/* Pushed to the far edge: it dates the cut, it does not describe it. */
+.time {
+  flex: none;
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--dsw-alias-label-caption);
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: calc(24px + var(--dsh-content-font-delta, 0px));
+  white-space: nowrap;
+}
+
+/*
+ * Indented to the title (leading box + its 6px gap), like the reasoning body, so
+ * the summary lines up under "上下文已压缩" rather than under the icon.
+ */
+.body {
+  padding: 4px 0 4px calc(22px + var(--dsh-content-font-delta, 0px));
+}
+
+.note {
+  margin: 0 0 8px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: calc(20px + var(--dsh-content-font-delta-secondary, 0px));
+}
+
+/*
+ * pi's summaries run to tens of KB and are structured markdown, so the body
+ * scrolls instead of growing the transcript by screens. 320px is roughly the
+ * slot dsh gives a long folded payload: enough to read the checkpoint's shape
+ * and scroll within it rather than push the turns below out of reach.
+ */
+.summary {
+  max-height: 320px;
+  overflow-y: auto;
+  color: var(--dsw-alias-label-secondary);
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: calc(20px + var(--dsh-content-font-delta-secondary, 0px));
+}
+
+/*
+ * The running label's shimmer. Same gradient-and-clip trick as the turn status:
+ * the fill is transparent, the background is the two-tone blue, and
+ * `background-clip: text` punches the glyphs out of it. Everything else about
+ * the row (height, font, colour at rest) is `DisclosureRow`'s.
+ */
+.runningText {
+  background: linear-gradient(
+    90deg,
+    var(--dsw-static-deepseek-500) 0%,
+    var(--dsw-static-deepseek-500) 40%,
+    var(--dsw-static-deepseek-200) 50%,
+    var(--dsw-static-deepseek-500) 60%,
+    var(--dsw-static-deepseek-500) 100%
+  );
+  color: #0000;
+  -webkit-text-fill-color: transparent;
+  background-position: 100% 0;
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: dsh-compaction-shimmer 1.8s linear infinite;
+}
+
+@keyframes dsh-compaction-shimmer {
+  to {
+    background-position: 0 0;
+  }
+}
+
+/* The shimmer is the text's only fill, so hand back a flat colour. */
+@media (prefers-reduced-motion: reduce) {
+  .runningText {
+    background-position: 0 0;
+    background-size: 100% 100%;
+    animation: none;
+  }
+}
