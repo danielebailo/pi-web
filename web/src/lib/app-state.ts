@@ -37,6 +37,7 @@ import type {
   UpdatesView,
   WebSettings,
 } from "./types.ts";
+import { DEFAULT_PRESET_ID } from "./types.ts";
 
 /**
  * Mirrors the server's defaults so a slow `/api/settings` is invisible: the
@@ -209,8 +210,19 @@ export interface AppState {
    * (see `sidebar-view.ts`).
    */
   sidebarView: SidebarView;
-  /** Slash commands per project id, as reported by a running pi process. */
+  /** Slash commands per composition, keyed by `commandsKey(projectId, presetId)`:
+   * what a process registers is a property of how it was composed. */
   commands: Record<string, SlashCommand[]>;
+  /**
+   * Keys of `commands` whose listing came back without the process's own
+   * commands — only the built-ins this UI knows.
+   *
+   * A partial list is kept (the built-ins still complete) but not treated as
+   * final: the enumeration failed because no pi process could answer yet, and
+   * the next attempt usually can. Leaving it in `commands` unmarked is what
+   * used to hide every skill until a page reload.
+   */
+  commandsPartial: Record<string, boolean>;
   /** Host home directory; empty until known, which just leaves paths absolute. */
   home: string;
   /** UI preferences, owned by this app. */
@@ -271,6 +283,7 @@ const initialState: AppState = {
   searchOpen: false,
   sidebarView: loadSidebarView(),
   commands: {},
+  commandsPartial: {},
   home: "",
   settings: DEFAULT_SETTINGS,
   agentSettings: {},
@@ -284,8 +297,48 @@ const initialState: AppState = {
 /** In-flight spawn for the draft the user is currently looking at. */
 let draftRequest: Promise<string | null> | null = null;
 
-/** In-flight command listings per project id, so rapid switching asks once. */
+/**
+ * The scope a command listing belongs to: one project, composed one way.
+ *
+ * Commands live inside a pi process, and that process's composition decides
+ * which ones exist — a minimal session registers no prompt templates and no
+ * skills, only the extensions its own arguments kept. Keying the cache by
+ * project alone would let the first session of a workspace answer for every
+ * other one, which is the bug this shape exists to prevent.
+ */
+export function commandsKey(projectId: string, presetId: string): string {
+  return `${projectId}\u0000${presetId}`;
+}
+
+/** In-flight command listings per composition, so rapid switching asks once. */
 const commandsRequests = new Map<string, Promise<void>>();
+
+/**
+ * Backoff for a listing that came back partial: the server answered with its
+ * built-ins because no pi process could be reached yet, and a cold start takes
+ * a moment. Bounded — once the delays run out the built-ins stay usable and a
+ * later mount asks again.
+ */
+const COMMANDS_RETRY_DELAYS_MS = [1_500, 4_000, 10_000];
+
+/** Retries already scheduled per composition, so a slow start is not a storm. */
+const commandsRetries = new Map<string, number>();
+
+/**
+ * Ask again for a composition whose listing was partial.
+ *
+ * `loadCommands` is driven by a composer becoming known, not by a clock, so
+ * without this a one-off miss while the pi process was still starting would
+ * hide every skill in the menu until the page was reloaded.
+ */
+function scheduleCommandsRetry(projectId: string, presetId: string): void {
+  const key = commandsKey(projectId, presetId);
+  const attempt = commandsRetries.get(key) ?? 0;
+  const delay = COMMANDS_RETRY_DELAYS_MS[attempt];
+  if (delay === undefined) return;
+  commandsRetries.set(key, attempt + 1);
+  setTimeout(() => void actions.loadCommands(projectId, presetId, true), delay);
+}
 
 /**
  * The newest session-list request per project id.
@@ -748,8 +801,10 @@ export const actions = {
     // the on-demand path in startDraftSession still works.
     void api.prewarmSession(projectId).catch(() => undefined);
     // Commands live inside the pi process, so ask for them while the user is
-    // still deciding. The request joins the prewarm above on the server.
-    void actions.loadCommands(projectId);
+    // still deciding. The request joins the prewarm above on the server. The
+    // default composition is what a new session gets unless the user picks
+    // another one on the hero, which asks again for that composition.
+    void actions.loadCommands(projectId, DEFAULT_PRESET_ID);
   },
 
   /** Idempotent: reveal a project's sessions without toggling them shut. */
@@ -762,36 +817,67 @@ export const actions = {
   },
 
   /**
-   * Fetch the slash commands a project's pi process has registered — extension
-   * commands, prompt templates, and skill commands such as `/skill:pdf-tools`.
+   * Fetch the slash commands one composition registers — extension commands,
+   * prompt templates, and skill commands such as `/skill:pdf-tools`.
    *
-   * Only a running process knows them, so the first call may wait on the
-   * project's prewarm. The result is cached in state, and an empty list still
-   * counts as loaded so a project without commands stops re-asking. Failures
-   * are swallowed: completion is an affordance, not a requirement.
+   * Only a running process knows them, so the first call may wait on a prewarm
+   * for that composition. The result is cached in state under
+   * `commandsKey(projectId, presetId)`, and an empty list still counts as loaded
+   * so a composition without extra commands stops re-asking.
+   *
+   * A listing that came back with the server's `error` is only the built-ins:
+   * the process could not be reached, so the skills and templates are missing
+   * rather than absent. It is stored for the completion it still offers but
+   * marked partial (see `commandsPartial`) and retried, because treating it as
+   * final is what made an unlucky first ask hide every skill until a reload.
+   * Transport failures are swallowed: completion is an affordance, not a
+   * requirement.
    */
-  async loadCommands(projectId: string, force = false): Promise<void> {
-    if (!force && appStore.get().commands[projectId]) return;
+  async loadCommands(
+    projectId: string,
+    presetId: string = DEFAULT_PRESET_ID,
+    force = false,
+  ): Promise<void> {
+    const key = commandsKey(projectId, presetId);
+    const cached = appStore.get().commands[key];
+    const partial = appStore.get().commandsPartial[key] === true;
+    if (!force && cached && !partial) return;
 
-    const inflight = commandsRequests.get(projectId);
+    const inflight = commandsRequests.get(key);
     if (inflight) return inflight;
 
     const request = (async (): Promise<void> => {
       try {
-        const result = await api.listCommands(projectId);
-        appStore.update((state) => ({
-          ...state,
-          commands: { ...state.commands, [projectId]: result.commands },
-        }));
-        if (result.error) console.warn(`[commands] ${projectId}: ${result.error}`);
+        const result = await api.listCommands(projectId, presetId);
+        // The server echoes the composition it answered for. Trusting that over
+        // the request keeps a reply that raced a preset change from landing
+        // under the key that was asked for.
+        const landed = commandsKey(projectId, result.presetId ?? presetId);
+        const partial = result.error !== undefined;
+        appStore.update((state) => {
+          const commandsPartial = { ...state.commandsPartial };
+          if (partial) commandsPartial[landed] = true;
+          else delete commandsPartial[landed];
+          return {
+            ...state,
+            commands: { ...state.commands, [landed]: result.commands },
+            commandsPartial,
+          };
+        });
+        if (partial) {
+          console.warn(`[commands] ${projectId} ${presetId}: ${result.error}`);
+          scheduleCommandsRetry(projectId, presetId);
+        } else {
+          commandsRetries.delete(key);
+        }
       } catch (err) {
-        console.warn(`[commands] ${projectId}: ${(err as Error).message}`);
+        console.warn(`[commands] ${projectId} ${presetId}: ${(err as Error).message}`);
       } finally {
-        commandsRequests.delete(projectId);
+        commandsRequests.delete(key);
       }
     })();
 
-    commandsRequests.set(projectId, request);
+    commandsRequests.set(key, request);
     return request;
   },
 

@@ -8,11 +8,13 @@ import { api } from "./api.ts";
 import {
   actions,
   appStore,
+  commandsKey,
   isDraftSession,
   resetAppState,
   DRAFT_PREFIX,
 } from "./app-state.ts";
 import type { ExtensionUiRequest, ProjectView, SessionView } from "./types.ts";
+import { DEFAULT_PRESET_ID } from "./types.ts";
 
 vi.mock("./api.ts", () => ({
   api: {
@@ -412,7 +414,7 @@ describe("slash commands", () => {
   it("caches a project's commands after the first load", async () => {
     mocked.listCommands.mockResolvedValue({ commands });
     await actions.loadCommands("project-1");
-    expect(appStore.get().commands["project-1"]).toEqual(commands);
+    expect(appStore.get().commands[commandsKey("project-1", DEFAULT_PRESET_ID)]).toEqual(commands);
 
     await actions.loadCommands("project-1");
     expect(mocked.listCommands).toHaveBeenCalledTimes(1);
@@ -443,7 +445,7 @@ describe("slash commands", () => {
   it("does not cache a failure, so a retry is possible", async () => {
     mocked.listCommands.mockRejectedValueOnce(new Error("offline"));
     await actions.loadCommands("project-1");
-    expect(appStore.get().commands["project-1"]).toBeUndefined();
+    expect(appStore.get().commands[commandsKey("project-1", DEFAULT_PRESET_ID)]).toBeUndefined();
 
     await actions.loadCommands("project-1");
     expect(mocked.listCommands).toHaveBeenCalledTimes(2);
@@ -456,8 +458,88 @@ describe("slash commands", () => {
     await actions.loadCommands("project-1");
     await actions.loadCommands("project-2");
 
-    expect(appStore.get().commands["project-1"]).toEqual(commands);
-    expect(appStore.get().commands["project-2"]).toEqual([]);
+    expect(appStore.get().commands[commandsKey("project-1", DEFAULT_PRESET_ID)]).toEqual(commands);
+    expect(appStore.get().commands[commandsKey("project-2", DEFAULT_PRESET_ID)]).toEqual([]);
+  });
+
+  it("keys a listing by composition, not by project", async () => {
+    mocked.listCommands.mockResolvedValueOnce({ commands, presetId: "standard" });
+    mocked.listCommands.mockResolvedValueOnce({ commands: [], presetId: "minimal" });
+
+    await actions.loadCommands("project-1", "standard");
+    await actions.loadCommands("project-1", "minimal");
+
+    // One workspace, two compositions: the minimal one has no skills or
+    // templates to offer, and caching both under the project would hide that.
+    expect(appStore.get().commands[commandsKey("project-1", "standard")]).toEqual(commands);
+    expect(appStore.get().commands[commandsKey("project-1", "minimal")]).toEqual([]);
+    expect(mocked.listCommands).toHaveBeenCalledTimes(2);
+  });
+
+  it("files an answer under the composition the server named", async () => {
+    // A reply that raced a preset change names the composition it answered for;
+    // trusting the request instead would leave the menu describing a process
+    // this session is not running.
+    mocked.listCommands.mockResolvedValueOnce({ commands, presetId: "minimal" });
+
+    await actions.loadCommands("project-1", "standard");
+
+    expect(appStore.get().commands[commandsKey("project-1", "minimal")]).toEqual(commands);
+    expect(appStore.get().commands[commandsKey("project-1", "standard")]).toBeUndefined();
+  });
+});
+
+describe("partial command listings", () => {
+  // A listing that came back with the server's `error` is only the built-ins:
+  // no pi process answered, so the skills are missing rather than absent. Its
+  // retry is a timer, so these run on fake ones.
+  const builtins = [{ name: "compact", description: "Compact", source: "builtin" as const }];
+  const commands = [{ name: "skill:pdf-tools", description: "PDFs", source: "skill" as const }];
+  const key = commandsKey("project-1", DEFAULT_PRESET_ID);
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  // A partial reply is answered by the built-ins-only branch of the route, so
+  // the client keeps it for those but must not read it as "that is everything".
+  const partial = { commands: builtins, presetId: DEFAULT_PRESET_ID, error: "no pi process" };
+
+  it("keeps the built-ins but asks again, since the skills were missing", async () => {
+    mocked.listCommands.mockResolvedValueOnce(partial);
+    await actions.loadCommands("project-1");
+
+    expect(appStore.get().commands[key]).toEqual(builtins);
+    expect(appStore.get().commandsPartial[key]).toBe(true);
+
+    // A later ask ignores the cached partial answer, and the full list lands.
+    mocked.listCommands.mockResolvedValueOnce({ commands, presetId: DEFAULT_PRESET_ID });
+    await actions.loadCommands("project-1");
+
+    expect(mocked.listCommands).toHaveBeenCalledTimes(2);
+    expect(appStore.get().commands[key]).toEqual(commands);
+    expect(appStore.get().commandsPartial[key]).toBeUndefined();
+  });
+
+  it("retries on its own, so a skill list lost at startup comes back", async () => {
+    mocked.listCommands
+      .mockResolvedValueOnce(partial)
+      .mockResolvedValueOnce({ commands, presetId: DEFAULT_PRESET_ID });
+
+    await actions.loadCommands("project-1");
+    expect(appStore.get().commandsPartial[key]).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(mocked.listCommands).toHaveBeenCalledTimes(2);
+    expect(appStore.get().commands[key]).toEqual(commands);
+    expect(appStore.get().commandsPartial[key]).toBeUndefined();
   });
 });
 

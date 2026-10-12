@@ -62,6 +62,9 @@ export interface SlashCommand {
  * reason instead of an error status. */
 export interface SlashCommandList {
   commands: SlashCommand[];
+  /** The composition the list answers for, echoed back so a reply that raced a
+   * preset change lands under the key it belongs to. */
+  presetId?: string;
   error?: string;
 }
 

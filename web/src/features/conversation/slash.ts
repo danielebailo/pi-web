@@ -37,24 +37,57 @@ const SOURCE_ORDER: Record<SlashCommand["source"], number> = {
 };
 
 /**
- * Commands matching a query, best match first: prefix hits, then substring
- * hits on the name, then hits on the description only. Ties fall back to the
- * section order so equal matches stay grouped — with an empty query every
- * result is rank 0, which is what makes the menu read as sections.
+ * The part of a command name after its namespace: `git-commit` for
+ * `skill:git-commit`. Skill and template commands are namespaced, so the tail
+ * is the name the user is actually typing — matching it as a whole is what
+ * keeps an exact skill name above a longer one that merely contains it.
+ */
+function tailOf(name: string): string {
+  const colon = name.lastIndexOf(":");
+  return colon === -1 ? name : name.slice(colon + 1);
+}
+
+/**
+ * A name stripped of the punctuation between its words, so `git-commit` and
+ * `gitcommit` become the same string. Only a fallback: a hit on the real text
+ * always outranks it, which keeps `/gc` from drowning the menu in noise.
+ */
+function flatten(text: string): string {
+  return text.replace(/[^a-z0-9]/g, "");
+}
+
+/** How well one command answers `needle`; lower is better, null is no match. */
+function rankOf(command: SlashCommand, needle: string, flatNeedle: string): number | null {
+  const name = command.name.toLowerCase();
+  const tail = tailOf(name);
+  if (name === needle || tail === needle) return 0;
+  // The tail comes first so `/git-commit` surfaces `skill:git-commit` as a
+  // prefix hit rather than leaving it to tie with every other substring match.
+  if (tail.startsWith(needle) || name.startsWith(needle)) return 1;
+  if (name.includes(needle)) return 2;
+  if (flatNeedle.length >= 2 && flatten(name).includes(flatNeedle)) return 3;
+  const description = command.description?.toLowerCase();
+  if (description === undefined) return null;
+  if (description.includes(needle)) return 4;
+  return flatNeedle.length >= 2 && flatten(description).includes(flatNeedle) ? 4 : null;
+}
+
+/**
+ * Commands matching a query, best match first: an exact name (or the name after
+ * its `skill:`/template namespace), then a prefix of either, then a substring
+ * of the name, then a punctuation-insensitive hit, then the description alone.
+ * Ties fall back to the section order so equal matches stay grouped — with an
+ * empty query every result is rank 0, which is what makes the menu read as
+ * sections.
  */
 export function filterCommands(commands: SlashCommand[], query: string): SlashCommand[] {
   const needle = query.trim().toLowerCase();
+  const flatNeedle = flatten(needle);
   const scored: { command: SlashCommand; rank: number }[] = [];
 
   for (const command of commands) {
-    const name = command.name.toLowerCase();
-    if (needle.length === 0 || name.startsWith(needle)) {
-      scored.push({ command, rank: 0 });
-    } else if (name.includes(needle)) {
-      scored.push({ command, rank: 1 });
-    } else if (command.description?.toLowerCase().includes(needle)) {
-      scored.push({ command, rank: 2 });
-    }
+    const rank = needle.length === 0 ? 0 : rankOf(command, needle, flatNeedle);
+    if (rank !== null) scored.push({ command, rank });
   }
 
   return scored
@@ -98,4 +131,26 @@ export function parseBuiltinCommand(
   if (!command) return null;
 
   return { command, args: (match[2] ?? "").trim() };
+}
+
+/**
+ * The name of a slash command nothing in this composition registered.
+ *
+ * Returns null for everything that is not a bare `/name`: ordinary prose such as
+ * `/etc/hosts`, and anything with a slash inside it. `/skill:…` is a name in its
+ * own right, so it takes the same lookup as any other.
+ *
+ * `parseBuiltinCommand` answers whether the text can run here; this answers the
+ * rest of the same question, so a typed command that no process registered is
+ * said out loud instead of quietly becoming prose. pi would pass it through to
+ * the model unchanged, which reads like a command that did nothing rather than
+ * like a command that does not exist — and in a minimal composition that is the
+ * usual case, since it keeps no templates and no skills.
+ */
+export function unknownCommandName(text: string, commands: SlashCommand[]): string | null {
+  const match = /^\/([^\s/]+)(?:\s+[\s\S]*)?$/.exec(text.trim());
+  if (!match) return null;
+  const name = match[1] ?? "";
+  if (name.length === 0) return null;
+  return commands.some((command) => command.name === name) ? null : name;
 }

@@ -1138,6 +1138,50 @@ describe("slash commands api", () => {
     expect(res.status).toBe(404);
   });
 
+  it("answers for the composition it was asked about", async () => {
+    const project = await createProject("commands-preset");
+    const standard = await api<{ commands: { name: string }[]; presetId: string }>(
+      `/api/projects/${project.id}/commands?presetId=standard`,
+    );
+    const minimal = await api<{ commands: { name: string }[]; presetId: string }>(
+      `/api/projects/${project.id}/commands?presetId=minimal`,
+    );
+
+    expect(standard.body.presetId).toBe("standard");
+    expect(minimal.body.presetId).toBe("minimal");
+    // Built-ins are this server's and stay; the rest follow the process.
+    expect(standard.body.commands.map((command) => command.name)).toContain("skill:pdf-tools");
+    // A minimal process loads no skills and no prompt templates, and keeps only
+    // the one extension its own arguments put back.
+    expect(minimal.body.commands.map((command) => command.name)).toEqual([
+      "compact",
+      "export",
+      "session",
+      "name",
+      "web",
+    ]);
+  });
+
+  it("keeps one composition's listing from answering for another", async () => {
+    const project = await createProject("commands-scope");
+    const minimal = await api<{ commands: { name: string }[] }>(
+      `/api/projects/${project.id}/commands?presetId=minimal`,
+    );
+    const standard = await api<{ commands: { name: string }[] }>(
+      `/api/projects/${project.id}/commands?presetId=standard`,
+    );
+
+    expect(minimal.body.commands.map((command) => command.name)).not.toContain("skill:pdf-tools");
+    // Cached under its own key, the standard listing is still the standard one.
+    expect(standard.body.commands.map((command) => command.name)).toContain("skill:pdf-tools");
+  });
+
+  it("rejects an unknown preset instead of guessing one", async () => {
+    const project = await createProject("commands-bad-preset");
+    const res = await api(`/api/projects/${project.id}/commands?presetId=nope`);
+    expect(res.status).toBe(400);
+  });
+
   it("reports a failure inline instead of failing the request", async () => {
     const project = await createProject("commands-failure");
     vi.spyOn(registry, "listCommands").mockRejectedValueOnce(new Error("pi rpc failed"));

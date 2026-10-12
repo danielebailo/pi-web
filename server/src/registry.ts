@@ -184,7 +184,7 @@ class SessionRegistry {
     const warm = this.findPrewarmed(projectPath, presetId);
     if (warm) return warm;
 
-    const key = this.prewarmKey(projectPath, presetId);
+    const key = this.compositionKey(projectPath, presetId);
     const inflight = this.prewarming.get(key);
     if (inflight) return inflight;
 
@@ -210,17 +210,29 @@ class SessionRegistry {
   }
 
   /**
-   * Slash commands registered for a project: extension commands, prompt
+   * Slash commands one composition registers: extension commands, prompt
    * templates, and skill commands (`/skill:name`).
    *
    * pi expands skill and template commands itself before delivering a prompt,
    * so the client only needs to complete the text.
+   *
+   * The composition is part of the question rather than an implementation
+   * detail. A minimal process registers no prompt templates and no skills, so
+   * its menu is the client's built-ins plus whatever its one `--extension` put
+   * back (`/web`). Answering a minimal session from a standard process would
+   * offer commands that session cannot run — which is why the handle is matched
+   * by preset instead of taking "any live process in this project".
    */
-  async listCommands(projectPath: string): Promise<SlashCommand[]> {
-    const cached = this.commandsCache.get(projectPath);
+  async listCommands(
+    projectPath: string,
+    presetId: string = DEFAULT_PRESET_ID,
+  ): Promise<SlashCommand[]> {
+    const key = this.compositionKey(projectPath, presetId);
+    const cached = this.commandsCache.get(key);
     if (cached && Date.now() - cached.at < COMMANDS_TTL_MS) return cached.commands;
 
-    const handle = this.findLive(projectPath) ?? (await this.ensurePrewarmed(projectPath));
+    const handle =
+      this.findLive(projectPath, presetId) ?? (await this.ensurePrewarmed(projectPath, presetId));
     if (!handle) throw new Error("no pi process available to enumerate commands");
 
     let commands: SlashCommand[];
@@ -234,14 +246,22 @@ class SessionRegistry {
     }
 
     handle.lastActivityAt = Date.now();
-    this.commandsCache.set(projectPath, { at: Date.now(), commands });
+    this.commandsCache.set(key, { at: Date.now(), commands });
     return commands;
   }
 
-  /** Any live session attached to this project, prewarmed or not. */
-  findLive(projectPath: string): SessionHandle | null {
+  /**
+   * A live session attached to this project, prewarmed or not.
+   *
+   * `presetId` narrows it to one composition. Omit it for "some process that
+   * can answer for this project" — the question `openSession` and the capacity
+   * sweeper ask — and pass it wherever the answer belongs to a composition.
+   */
+  findLive(projectPath: string, presetId?: string): SessionHandle | null {
     for (const handle of this.handles.values()) {
-      if (!handle.dead && handle.projectPath === projectPath) return handle;
+      if (handle.dead || handle.projectPath !== projectPath) continue;
+      if (presetId !== undefined && handle.presetId !== presetId) continue;
+      return handle;
     }
     return null;
   }
@@ -278,15 +298,22 @@ class SessionRegistry {
     return null;
   }
 
-  /** Identity of one prewarm slot: a project paired with a composition. */
-  private prewarmKey(projectPath: string, presetId: string): string {
+  /**
+   * Identity of one composition of a project: its path paired with a preset.
+   *
+   * Doubles as the prewarm slot key and the command-cache key, because both
+   * answer the same question — "which composition is this about?" — and a menu
+   * that resolved it differently from the process would offer commands the
+   * session cannot run.
+   */
+  private compositionKey(projectPath: string, presetId: string): string {
     return `${projectPath}\u0000${presetId}`;
   }
 
   private async dropPrewarmedExcept(projectPath: string, presetId: string): Promise<void> {
-    const keep = this.prewarmKey(projectPath, presetId);
+    const keep = this.compositionKey(projectPath, presetId);
     for (const handle of [...this.handles.values()]) {
-      if (handle.prewarmed && this.prewarmKey(handle.projectPath, handle.presetId) !== keep) {
+      if (handle.prewarmed && this.compositionKey(handle.projectPath, handle.presetId) !== keep) {
         await this.close(handle.sessionPath, "prewarm-superseded");
       }
     }

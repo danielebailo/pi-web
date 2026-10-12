@@ -20,7 +20,7 @@ import { askUserQuestions } from "./question-model.ts";
 import { SessionStats } from "./SessionStats.tsx";
 import { MessageList } from "./MessageList.tsx";
 import { NewSessionHero } from "./NewSessionHero.tsx";
-import { parseBuiltinCommand } from "./slash.ts";
+import { parseBuiltinCommand, unknownCommandName } from "./slash.ts";
 import { TodoPanel } from "./TodoPanel.tsx";
 import { useComposerState } from "./useComposerState.ts";
 import { useConversation } from "./useConversation.ts";
@@ -166,7 +166,55 @@ export function ConversationPane() {
   const sessions = state.selectedProjectId ? (state.sessions[state.selectedProjectId] ?? []) : [];
   const session = sessions.find((candidate) => candidate.path === selected);
   const isExternal = selected ? Boolean(state.externalChanged[selected]) : false;
-  const commands = state.selectedProjectId ? (state.commands[state.selectedProjectId] ?? []) : [];
+  /**
+   * The composition this conversation runs, and the commands that come with it.
+   *
+   * A menu drawn from "the project's commands" would offer a minimal session
+   * the extensions and skills it does not have, so the list is read under the
+   * composition's own key (see `commandsKey`). While a draft has no composer
+   * state yet, the hero's own pick is the best answer available: the process
+   * was started with it a moment ago.
+   */
+  const presetId =
+    composer.state?.presetId ??
+    (draft ? (state.newSessionPresetId ?? DEFAULT_PRESET_ID) : DEFAULT_PRESET_ID);
+  /**
+   * The composition the composer has read back, if it has.
+   *
+   * Kept apart from `presetId` so waiting for it does not make the fallback
+   * itself look like an answer: a session's real composition arrives with the
+   * composer read, and asking for the default in the meantime would spend a
+   * request — and a prewarm — on a process this session is not running.
+   */
+  const readPresetId = composer.state?.presetId;
+  const commandScope = state.selectedProjectId
+    ? commandsKey(state.selectedProjectId, presetId)
+    : null;
+  const commands = commandScope !== null ? (state.commands[commandScope] ?? []) : [];
+  /**
+   * False until that composition's listing has landed, and false again while
+   * it is partial.
+   *
+   * An unloaded list must not be read as "nothing is registered", or every
+   * command typed in the first second of a session would be reported missing.
+   * A partial one — the server's built-ins, no pi process behind them — is the
+   * same false negative for skills and templates, so it does not count as the
+   * answer either.
+   */
+  const commandsLoaded =
+    commandScope !== null &&
+    state.commands[commandScope] !== undefined &&
+    state.commandsPartial[commandScope] !== true;
+  // Ask for that composition's commands as soon as it is known. The listing is
+  // cached per composition, so two sessions of one workspace that share a
+  // composition cost one request between them.
+  useEffect(() => {
+    if (state.selectedProjectId === null) return;
+    // A draft has no composer read of its own, so the hero's pick stands in;
+    // every other session waits for its own answer rather than guessing.
+    if (!draft && readPresetId === undefined) return;
+    void actions.loadCommands(state.selectedProjectId, presetId);
+  }, [state.selectedProjectId, readPresetId, draft, presetId]);
 
   /**
    * A message typed before the spawn finished is queued for the real session
@@ -197,6 +245,16 @@ export function ConversationPane() {
         return true;
       }
 
+      // A command nothing registered is not a command. pi would pass it through
+      // to the model as ordinary text, which reads like a command that did
+      // nothing — so say so, and still send it: the user may have meant the
+      // text. Only once the listing has landed, since an empty list would
+      // otherwise make every command look unregistered.
+      const unknown = commandsLoaded ? unknownCommandName(text, commands) : null;
+      if (unknown !== null) {
+        actions.setNotice(t("composer.unknownCommand", { name: `/${unknown}` }));
+      }
+
       if (sessionPath) return conversation.send(text, mode, images);
       if (!draft) return false;
       const realPath = await actions.resolveDraftSession();
@@ -204,7 +262,7 @@ export function ConversationPane() {
       actions.queuePendingPrompt(realPath, text, mode, images);
       return true;
     },
-    [sessionPath, draft, conversation, commands],
+    [sessionPath, draft, conversation, commands, commandsLoaded, t],
   );
 
   const reload = async (): Promise<void> => {

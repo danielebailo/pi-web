@@ -7,7 +7,7 @@ import {
   SendIcon,
 } from "../../components/icons.tsx";
 import { Glyph } from "../../components/dsh-icons.tsx";
-import { actions, appStore, useT } from "../../lib/app-state.ts";
+import { actions, appStore, commandsKey, useT } from "../../lib/app-state.ts";
 import { presetDescription, presetName } from "../../lib/presets.ts";
 import { DEFAULT_PRESET_ID } from "../../lib/types.ts";
 import { isCoarsePointer } from "../../lib/pointer.ts";
@@ -231,9 +231,15 @@ export function NewSessionHero() {
   });
   // The hero opens a *new* session, while every built-in command acts on an
   // existing one (/compact, /export, /session, /name), so offering them here
-  // would just be a menu of things that cannot work yet.
+  // would just be a menu of things that cannot work yet. The rest of the menu
+  // follows the composition the user picked next door: choosing minimal has to
+  // drop the skills and templates that composition does not load, or the menu
+  // would promise a first message's command that the session cannot run.
+  const heroPresetId = state.newSessionPresetId ?? DEFAULT_PRESET_ID;
   const commands = (
-    state.selectedProjectId ? (state.commands[state.selectedProjectId] ?? []) : []
+    state.selectedProjectId
+      ? (state.commands[commandsKey(state.selectedProjectId, heroPresetId)] ?? [])
+      : []
   ).filter((command) => command.source !== "builtin");
   const completion = useSlashCompletion({ setText, textareaRef, commands });
   /** The `@` menu, searching the project the first message will be sent in. */
@@ -246,6 +252,14 @@ export function NewSessionHero() {
   useEffect(() => {
     textareaRef.current?.focus();
   }, []);
+
+  // Fetch the picked composition's commands, so the `/` menu describes the
+  // session the first message will actually create.
+  useEffect(() => {
+    if (state.selectedProjectId !== null) {
+      void actions.loadCommands(state.selectedProjectId, heroPresetId);
+    }
+  }, [state.selectedProjectId, heroPresetId]);
 
   useEffect(() => {
     const element = textareaRef.current;

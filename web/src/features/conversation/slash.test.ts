@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SlashCommand } from "../../lib/types.ts";
-import { detectSlashTrigger, filterCommands, parseBuiltinCommand } from "./slash.ts";
+import { detectSlashTrigger, filterCommands, parseBuiltinCommand, unknownCommandName } from "./slash.ts";
 
 describe("detectSlashTrigger", () => {
   it("finds a slash at the start of the input", () => {
@@ -107,6 +107,43 @@ describe("filterCommands", () => {
     ]);
   });
 
+  it("puts an exact skill name above a longer name that contains it", () => {
+    // The namespace (`skill:`) is part of the name but not part of what the
+    // user types, so `/search` has to rank `skill:search` by its tail —
+    // otherwise `skill:brave-search` ties it and the alphabet decides.
+    const namespaced: SlashCommand[] = [
+      { name: "skill:brave-search", source: "skill" },
+      { name: "skill:search", source: "skill" },
+    ];
+    expect(filterCommands(namespaced, "search").map((command) => command.name)).toEqual([
+      "skill:search",
+      "skill:brave-search",
+    ]);
+  });
+
+  it("ranks a skill's tail prefix above a longer name's substring", () => {
+    const mixed: SlashCommand[] = [
+      { name: "skill:legacy-git-tools", source: "skill" },
+      { name: "skill:git-commit", description: "Make a commit", source: "skill" },
+      { name: "export", description: "writes git patches", source: "extension" },
+    ];
+    expect(filterCommands(mixed, "git").map((command) => command.name)).toEqual([
+      "skill:git-commit",
+      "skill:legacy-git-tools",
+      "export",
+    ]);
+  });
+
+  it("finds a separated name without the punctuation", () => {
+    const namespaced: SlashCommand[] = [{ name: "skill:git-commit", source: "skill" }];
+    expect(filterCommands(namespaced, "gitcommit").map((command) => command.name)).toEqual([
+      "skill:git-commit",
+    ]);
+    expect(filterCommands(namespaced, "skillgit").map((command) => command.name)).toEqual([
+      "skill:git-commit",
+    ]);
+  });
+
   it("puts built-in commands first when nothing is typed", () => {
     const withBuiltin: SlashCommand[] = [
       { name: "skill:pdf-tools", source: "skill" },
@@ -159,5 +196,26 @@ describe("parseBuiltinCommand", () => {
 
   it("will not match a name containing a slash", () => {
     expect(parseBuiltinCommand("/compact/now", runnable)).toBeNull();
+  });
+});
+
+describe("unknownCommandName", () => {
+  it("names a command nothing in this composition registered", () => {
+    // The minimal composition keeps no templates and no skills, which is
+    // exactly the case this reports instead of letting the text pass as prose.
+    expect(unknownCommandName("/review", runnable)).toBe("review");
+    expect(unknownCommandName("/skill:pdf-tools extract", [])).toBe("skill:pdf-tools");
+  });
+
+  it("accepts everything the listing does offer", () => {
+    expect(unknownCommandName("/compact", runnable)).toBeNull();
+    expect(unknownCommandName("/skill:pdf-tools extract", runnable)).toBeNull();
+  });
+
+  it("ignores text and paths", () => {
+    expect(unknownCommandName("hello", runnable)).toBeNull();
+    expect(unknownCommandName("fix /etc/hosts", runnable)).toBeNull();
+    expect(unknownCommandName("/etc/hosts", runnable)).toBeNull();
+    expect(unknownCommandName("/compact/now", runnable)).toBeNull();
   });
 });

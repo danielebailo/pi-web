@@ -236,10 +236,17 @@ export const api = {
       body: JSON.stringify({ branch }),
     }),
 
-  /** Slash commands registered in a project's pi process. May have to wait for
-   * the prewarm, and reports failure inline rather than as an HTTP error. */
-  listCommands: (projectId: string) =>
-    request<SlashCommandList>(`/api/projects/${encodeURIComponent(projectId)}/commands`),
+  /** Slash commands one composition registers. May have to wait for that
+   * composition's prewarm, and reports failure inline rather than as an HTTP
+   * error. */
+  listCommands: (projectId: string, presetId?: string | null) => {
+    const params = new URLSearchParams();
+    if (presetId) params.set("presetId", presetId);
+    const query = params.toString();
+    return request<SlashCommandList>(
+      `/api/projects/${encodeURIComponent(projectId)}/commands${query.length > 0 ? `?${query}` : ""}`,
+    );
+  },
 
   /** Run a built-in command (`/compact`, …). These map to their own RPC method
    * and never reach the model, so the text is not sent as a prompt. */

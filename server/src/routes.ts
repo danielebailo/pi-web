@@ -1179,14 +1179,20 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
   });
 
   /**
-   * Slash commands available in a project: built-in commands, extension
-   * commands, prompt templates, and skill commands.
+   * Slash commands available in one composition of a project: built-in
+   * commands, extension commands, prompt templates, and skill commands.
    *
    * Built-in ones come from this server, not from pi — see `commands.ts`. They
    * are listed first and survive a failure to reach pi, since they need no
    * running process to be worth offering.
+   *
+   * `presetId` is what makes the rest of the list honest. A minimal session
+   * registers no templates and no skills, so its menu is the built-ins plus
+   * `/web`; answering from a standard process would list commands that session
+   * cannot run. Naming none asks for the default composition, which is what a
+   * caller that has no session in hand should get.
    */
-  route("GET", "/api/projects/:id/commands", async ({ res, params }) => {
+  route("GET", "/api/projects/:id/commands", async ({ res, params, query }) => {
     const project = await getProject(params.id!);
     const builtin: SlashCommand[] = BUILTIN_COMMANDS.map((command) => ({
       name: command.name,
@@ -1196,12 +1202,18 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
       source: "builtin",
     }));
 
+    const presetId = query.get("presetId") ?? DEFAULT_PRESET_ID;
+    if (findPreset(presetId) === null) throw badRequest(`unknown preset: ${presetId}`);
+
     try {
-      json(res, 200, { commands: [...builtin, ...(await registry.listCommands(project.path))] });
+      json(res, 200, {
+        commands: [...builtin, ...(await registry.listCommands(project.path, presetId))],
+        presetId,
+      });
     } catch (err) {
       // A failure here only costs the user their completions, so report it
       // inline instead of as an error banner.
-      json(res, 200, { commands: builtin, error: (err as Error).message });
+      json(res, 200, { commands: builtin, presetId, error: (err as Error).message });
     }
   });
 
