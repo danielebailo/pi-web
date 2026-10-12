@@ -1,7 +1,7 @@
 import type { RefObject } from "react";
 import { Glyph } from "../../components/dsh-icons.tsx";
 import { CloseIcon } from "../../components/icons.tsx";
-import { ACCEPTED_IMAGE_MIME_TYPES, imageDataUrl } from "../../lib/image-attachments.ts";
+import { ACCEPTED_IMAGE_MIME_TYPES, imageSource } from "../../lib/image-attachments.ts";
 import type { ImageBlock } from "../../lib/types.ts";
 import styles from "./AttachmentStrip.module.css";
 import { useT } from "../../lib/app-state.ts";
@@ -31,7 +31,7 @@ export function AttachmentStrip({
         <div className={styles.attachments}>
           {images.map((image, index) => (
             <div className={styles.attachment} key={index}>
-              <img src={imageDataUrl(image)} alt={t("attach.alt", { index: index + 1 })} />
+              <img src={imageSource(image)} alt={t("attach.alt", { index: index + 1 })} />
               <button
                 type="button"
                 className={styles.remove}

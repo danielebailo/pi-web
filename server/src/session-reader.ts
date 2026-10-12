@@ -3,6 +3,7 @@ import {
   buildContextEntries,
   type SessionContext,
 } from "@earendil-works/pi-coding-agent";
+import { openSessionForRead } from "./session-open.ts";
 
 /**
  * Read a session straight from its JSONL file, without a pi process.
@@ -73,8 +74,10 @@ function forkPointsFrom(manager: SessionManager): ForkPoint[] {
 export function readSessionSnapshot(sessionPath: string): SessionSnapshot {
   // `open()` parses the file synchronously. That is the same thing
   // `SessionManager.list()` does for every session in a project (103ms for a
-  // whole project), so a single file is well inside budget.
-  const manager = SessionManager.open(sessionPath);
+  // whole project), so a single file is well inside budget. The open goes through
+  // the shared reader so the composer request that a switch fires alongside this
+  // one reuses the parse instead of repeating it (see `session-open.ts`).
+  const manager = openSessionForRead(sessionPath);
   return {
     sessionId: manager.getSessionId(),
     messages: manager.buildSessionContext().messages,

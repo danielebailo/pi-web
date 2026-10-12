@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { imageDataUrl } from "../lib/image-attachments.ts";
+import { imageSource } from "../lib/image-attachments.ts";
 import type { ImageBlock } from "../lib/types.ts";
 import { CloseIcon } from "./icons.tsx";
 import styles from "./ImageLightbox.module.css";
@@ -74,7 +74,7 @@ export function ImageLightboxProvider({ children }: { children: ReactNode }) {
             if (event.target === event.currentTarget) close();
           }}
         >
-          <img className={styles.full} src={imageDataUrl(shown.image)} alt={shown.alt} />
+          <img className={styles.full} src={imageSource(shown.image)} alt={shown.alt} />
           <button
             type="button"
             className={styles.close}
@@ -120,7 +120,7 @@ export function ImageThumb({
       title={t("lightbox.open")}
       aria-label={t("lightbox.openLabel", { alt: label })}
     >
-      <img src={imageDataUrl(image)} alt={label} loading="lazy" />
+      <img src={imageSource(image)} alt={label} loading="lazy" />
     </button>
   );
 }

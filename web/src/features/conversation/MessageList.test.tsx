@@ -18,10 +18,12 @@ function view(messages: AgentMessage[], patch: Partial<ConversationView> = {}): 
     messages,
     forkPoints: [],
     todos: [],
+    pendingQuestions: [],
     partial: null,
     undeliveredPrompts: 0,
     toolExecutions: {},
     isStreaming: false,
+    compacting: false,
     loading: false,
     error: null,
     retry: null,
@@ -618,5 +620,135 @@ describe("retryPromptOf", () => {
 
   it("has nothing to re-send for a turn with no prompt", () => {
     expect(retryPromptOf([failed("overloaded")])).toBeNull();
+  });
+});
+
+/**
+ * Where the compaction shows up. It is a message in the transcript, so the row
+ * has to land in the transcript — before the turns it cut into, and never as a
+ * turn of its own.
+ */
+describe("MessageList compaction", () => {
+  const checkpoint = {
+    role: "compactionSummary" as const,
+    summary: "## 目标\n把会话继续下去。",
+    tokensBefore: 324_210,
+    timestamp: 0,
+  };
+
+  it("marks the cut above the turns it replaced", () => {
+    const html = renderToStaticMarkup(
+      <MessageList
+        view={view([checkpoint, asked("继续"), answered([text("好")])])}
+        cwd={CWD}
+        home="/Users/dev"
+      />,
+    );
+
+    expect(html).toContain("上下文已压缩");
+    expect(html).toContain("压缩前 324K tok");
+    // The boundary comes first: the context starts there.
+    expect(html.indexOf("上下文已压缩")).toBeLessThan(html.indexOf("继续"));
+  });
+
+  it("lands a checkpoint a live compaction just made under what it folded", () => {
+    // The live shape: the turns the compaction folded are still on screen (they
+    // arrived as message events), so the marker goes *after* them, where the
+    // reader watching the tail is looking.
+    const html = renderToStaticMarkup(
+      <MessageList
+        view={view([asked("继续"), answered([text("好")]), checkpoint])}
+        cwd={CWD}
+        home="/Users/dev"
+      />,
+    );
+
+    expect(html).toContain("上下文已压缩");
+    expect(html.indexOf("好")).toBeLessThan(html.indexOf("上下文已压缩"));
+  });
+
+  it("does not count the checkpoint as a turn", () => {
+    const html = renderToStaticMarkup(
+      <MessageList
+        view={view([checkpoint, asked("继续"), answered([text("好")])])}
+        cwd={CWD}
+        home="/Users/dev"
+      />,
+    );
+
+    // The prompt is still turn 1; a checkpoint that opened a turn would make it
+    // turn 2, and the rail's count and every jump target with it.
+    expect(html).toContain('data-turn="1"');
+    expect(html).not.toContain('data-turn="2"');
+  });
+
+  it("does not call a checkpoint-only transcript empty", () => {
+    // The kept tail can be empty for a moment right after a cut; the row is
+    // still something to show, and "还没有消息" would contradict it.
+    const withCheckpoint = renderToStaticMarkup(
+      <MessageList view={view([checkpoint])} cwd={CWD} home="/Users/dev" />,
+    );
+    expect(withCheckpoint).toContain("上下文已压缩");
+    expect(withCheckpoint).not.toContain("还没有消息");
+
+    const empty = renderToStaticMarkup(<MessageList view={view([])} cwd={CWD} home="/Users/dev" />);
+    expect(empty).toContain("还没有消息");
+  });
+
+  it("announces a compaction that is still running", () => {
+    const html = renderToStaticMarkup(
+      <MessageList view={view([asked("继续")], { compacting: true })} cwd={CWD} home="/Users/dev" />,
+    );
+
+    expect(html).toContain("正在压缩上下文…");
+  });
+
+  it("keeps the running label off a settled session", () => {
+    const html = renderToStaticMarkup(
+      <MessageList view={view([checkpoint, asked("继续")])} cwd={CWD} home="/Users/dev" />,
+    );
+
+    expect(html).not.toContain("正在压缩上下文…");
+  });
+});
+
+/**
+ * The mounted window.
+ *
+ * A long transcript is not mounted whole on the first commit — the tail is, and
+ * the rest is filled in afterwards. Static rendering runs no effects, so it
+ * shows exactly the first commit: the window, which is the thing worth pinning
+ * here (the catch-up itself is a browser-behaviour concern, measured in
+ * `bench/scenario-d-switch.ts`).
+ */
+describe("MessageList mounted window", () => {
+  const turns = (count: number): AgentMessage[] => {
+    const out: AgentMessage[] = [];
+    for (let index = 1; index <= count; index += 1) {
+      out.push(asked(`问题 ${String(index)}`), answered([text(`回答 ${String(index)}`)]));
+    }
+    return out;
+  };
+
+  it("mounts only the tail of a long transcript on the first render", () => {
+    const html = renderToStaticMarkup(
+      <MessageList view={view(turns(40))} sessionPath="/s/one.jsonl" cwd={CWD} home="/Users/dev" />,
+    );
+
+    // 24 flow items → the last 24 turns, i.e. 17..40.
+    expect(html).toContain('data-turn="40"');
+    expect(html).toContain('data-turn="17"');
+    expect(html).not.toContain('data-turn="16"');
+    expect(html).not.toContain('data-turn="1"');
+  });
+
+  it("mounts a transcript that fits the window whole", () => {
+    const html = renderToStaticMarkup(
+      <MessageList view={view(turns(5))} sessionPath="/s/one.jsonl" cwd={CWD} home="/Users/dev" />,
+    );
+
+    for (const turn of [1, 2, 3, 4, 5]) {
+      expect(html).toContain(`data-turn="${String(turn)}"`);
+    }
   });
 });

@@ -1,0 +1,217 @@
+{
+  "at": "2026-10-10T09:48:52.900Z",
+  "turns": 800,
+  "smallTurns": 10,
+  "imageEvery": 0,
+  "imageChars": 0,
+  "endpoint": {
+    "bothColdMs": 13,
+    "bothWarmMs": 7,
+    "messagesWarmMs": 4,
+    "messagesBytes": 697607,
+    "composerWarmMs": 0
+  },
+  "baseline": {
+    "wallMs": 179,
+    "paintMs": 146,
+    "fullMs": 179,
+    "reactCommits": 12,
+    "longTaskCount": 0,
+    "longTaskTotalMs": 0,
+    "longTaskMaxMs": 0,
+    "catchupLongTaskMs": 0,
+    "longTasks": [],
+    "busyMs": 405,
+    "topFunctions": [
+      {
+        "key": "(program) @ (vm):0",
+        "ms": 270
+      },
+      {
+        "key": "yU @ index-DdYTPA_5.js:250",
+        "ms": 39
+      },
+      {
+        "key": "(garbage collector) @ (vm):0",
+        "ms": 34
+      },
+      {
+        "key": "(anonymous) @ (vm):1",
+        "ms": 13
+      },
+      {
+        "key": "requestAnimationFrame @ (vm):0",
+        "ms": 12
+      },
+      {
+        "key": "(anonymous) @ (vm):0",
+        "ms": 8
+      },
+      {
+        "key": "tick @ (vm):101",
+        "ms": 5
+      },
+      {
+        "key": "querySelector @ (vm):0",
+        "ms": 4
+      }
+    ]
+  },
+  "median": {
+    "wallMs": 245,
+    "paintMs": 129,
+    "fullMs": 1861,
+    "reactCommits": 15,
+    "longTaskCount": 1,
+    "longTaskTotalMs": 52,
+    "longTaskMaxMs": 52,
+    "catchupLongTaskMs": 118,
+    "longTasks": [
+      {
+        "at": 30,
+        "ms": 52
+      }
+    ],
+    "busyMs": null,
+    "topFunctions": null
+  },
+  "worst": {
+    "wallMs": 250,
+    "paintMs": 135,
+    "fullMs": 1976,
+    "reactCommits": 15,
+    "longTaskCount": 1,
+    "longTaskTotalMs": 58,
+    "longTaskMaxMs": 58,
+    "catchupLongTaskMs": 124,
+    "longTasks": [
+      {
+        "at": 25,
+        "ms": 58
+      }
+    ],
+    "busyMs": 1985,
+    "topFunctions": [
+      {
+        "key": "yU @ index-DdYTPA_5.js:250",
+        "ms": 1294
+      },
+      {
+        "key": "(program) @ (vm):0",
+        "ms": 187
+      },
+      {
+        "key": "getBoundingClientRect @ (vm):0",
+        "ms": 148
+      },
+      {
+        "key": "(garbage collector) @ (vm):0",
+        "ms": 41
+      },
+      {
+        "key": "bt @ index-DdYTPA_5.js:50",
+        "ms": 21
+      },
+      {
+        "key": "Ny @ index-DdYTPA_5.js:49",
+        "ms": 15
+      },
+      {
+        "key": "(anonymous) @ index-DdYTPA_5.js:58",
+        "ms": 15
+      },
+      {
+        "key": "ls @ index-DdYTPA_5.js:59",
+        "ms": 14
+      }
+    ]
+  },
+  "switches": [
+    {
+      "wallMs": 188,
+      "paintMs": 115,
+      "fullMs": 1866,
+      "reactCommits": 13,
+      "longTaskCount": 0,
+      "longTaskTotalMs": 0,
+      "longTaskMaxMs": 0,
+      "catchupLongTaskMs": 118,
+      "longTasks": [],
+      "busyMs": null,
+      "topFunctions": null
+    },
+    {
+      "wallMs": 245,
+      "paintMs": 129,
+      "fullMs": 1861,
+      "reactCommits": 15,
+      "longTaskCount": 1,
+      "longTaskTotalMs": 52,
+      "longTaskMaxMs": 52,
+      "catchupLongTaskMs": 118,
+      "longTasks": [
+        {
+          "at": 30,
+          "ms": 52
+        }
+      ],
+      "busyMs": null,
+      "topFunctions": null
+    },
+    {
+      "wallMs": 250,
+      "paintMs": 135,
+      "fullMs": 1976,
+      "reactCommits": 15,
+      "longTaskCount": 1,
+      "longTaskTotalMs": 58,
+      "longTaskMaxMs": 58,
+      "catchupLongTaskMs": 124,
+      "longTasks": [
+        {
+          "at": 25,
+          "ms": 58
+        }
+      ],
+      "busyMs": 1985,
+      "topFunctions": [
+        {
+          "key": "yU @ index-DdYTPA_5.js:250",
+          "ms": 1294
+        },
+        {
+          "key": "(program) @ (vm):0",
+          "ms": 187
+        },
+        {
+          "key": "getBoundingClientRect @ (vm):0",
+          "ms": 148
+        },
+        {
+          "key": "(garbage collector) @ (vm):0",
+          "ms": 41
+        },
+        {
+          "key": "bt @ index-DdYTPA_5.js:50",
+          "ms": 21
+        },
+        {
+          "key": "Ny @ index-DdYTPA_5.js:49",
+          "ms": 15
+        },
+        {
+          "key": "(anonymous) @ index-DdYTPA_5.js:58",
+          "ms": 15
+        },
+        {
+          "key": "ls @ index-DdYTPA_5.js:59",
+          "ms": 14
+        }
+      ]
+    }
+  ],
+  "scrollUp": {
+    "ok": true,
+    "ms": 339
+  }
+}

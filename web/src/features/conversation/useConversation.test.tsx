@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it } from "vitest";
 import { actions, resetAppState } from "../../lib/app-state.ts";
-import { useConversation } from "./useConversation.ts";
+import { useConversation, compactionCheckpoint } from "./useConversation.ts";
 
 const RUNNING = "/home/me/.pi/agent/sessions/proj-abc/running.jsonl";
 const OTHER = "/home/me/.pi/agent/sessions/proj-abc/other.jsonl";
@@ -50,5 +50,38 @@ describe("useConversation run state", () => {
     actions.markSessionSettled(RUNNING);
 
     expect(renderToStaticMarkup(<Probe sessionPath={RUNNING} />)).toContain("idle");
+  });
+});
+
+/**
+ * What `compaction_end` has to get right: only a compaction that actually
+ * produced a summary leaves something to record. pi reports the failure and the
+ * abort on the same frame, with no `result`.
+ */
+describe("compactionCheckpoint", () => {
+  it("reads the summary and the size from a finished compaction", () => {
+    expect(
+      compactionCheckpoint({
+        type: "compaction_end",
+        aborted: false,
+        result: { summary: "what happened", tokensBefore: 324210 },
+      }),
+    ).toEqual({ summary: "what happened", tokensBefore: 324210 });
+  });
+
+  it("ignores an aborted compaction", () => {
+    expect(
+      compactionCheckpoint({
+        type: "compaction_end",
+        aborted: true,
+        result: { summary: "half a summary", tokensBefore: 1 },
+      }),
+    ).toBeNull();
+  });
+
+  it("ignores a failed compaction, which pi reports with no result", () => {
+    expect(
+      compactionCheckpoint({ type: "compaction_end", aborted: false, errorMessage: "overloaded" }),
+    ).toBeNull();
   });
 });

@@ -15,6 +15,7 @@ import type {
   ToolCallBlock,
 } from "../../lib/types.ts";
 import { projectTodos, type TodoItem } from "./todo-model.ts";
+import { projectPendingQuestions, type PendingQuestion } from "./pending-questions.ts";
 import { parseStreamingJson } from "../../lib/streaming-json.ts";
 import {
   EMPTY_TIMING,
@@ -50,6 +51,12 @@ export interface ConversationView {
    * one yet — all three are the same thing to every consumer here.
    */
   todos: TodoItem[];
+  /**
+   * Question batches whose deadline passed with no answer, still answerable
+   * (see `projectPendingQuestions`). Projected from the transcript like the
+   * plan above, so a reload, a compaction or a branch all agree about them.
+   */
+  pendingQuestions: PendingQuestion[];
   /** Assistant content being assembled right now, or null when idle. */
   partial: ContentBlock[] | null;
   /**
@@ -77,6 +84,16 @@ export interface ConversationView {
    * in `useConversation`.
    */
   isStreaming: boolean;
+  /**
+   * Whether pi is compacting this session's context right now.
+   *
+   * pi's own event stream is the only source: `get_state` reports it, but that
+   * figure cannot be polled cheaply, and a compaction is a bounded wait with a
+   * start and an end frame. `compaction_start` sets it and `compaction_end`
+   * clears it — and lands the checkpoint in the transcript, at the point the
+   * cut was made.
+   */
+  compacting: boolean;
   loading: boolean;
   error: string | null;
   /** An in-flight model retry, or null. */
@@ -109,6 +126,24 @@ export interface RetryState {
   deadline: number;
 }
 
+/**
+ * The checkpoint a `compaction_end` frame left behind, or null.
+ *
+ * pi reports a failed and an aborted compaction on the same frame, with no
+ * `result` — in both cases the context is exactly as it was and there is nothing
+ * to record. Only a result means the cut landed.
+ */
+export function compactionCheckpoint(
+  event: SessionEvent,
+): { summary: string; tokensBefore: number } | null {
+  if (event.aborted === true) return null;
+  const result = event.result;
+  if (typeof result !== "object" || result === null) return null;
+  const { summary, tokensBefore } = result as { summary?: unknown; tokensBefore?: unknown };
+  if (typeof summary !== "string" || typeof tokensBefore !== "number") return null;
+  return { summary, tokensBefore };
+}
+
 interface StreamSlot {
   content: ContentBlock[];
   /**
@@ -127,10 +162,12 @@ const emptyView: ConversationView = {
   messages: [],
   forkPoints: [],
   todos: [],
+  pendingQuestions: [],
   partial: null,
   undeliveredPrompts: 0,
   toolExecutions: {},
   isStreaming: false,
+  compacting: false,
   loading: true,
   error: null,
   retry: null,
@@ -385,6 +422,8 @@ export function useConversation(sessionPath: string | null): ConversationApi {
   const slotRef = useRef<StreamSlot | null>(null);
   const toolsRef = useRef<Record<string, ToolExecution>>({});
   const streamingRef = useRef(false);
+  /** Whether pi is compacting right now; see `ConversationView.compacting`. */
+  const compactingRef = useRef(false);
   const loadingRef = useRef(true);
   const errorRef = useRef<string | null>(null);
   const retryRef = useRef<RetryState | null>(null);
@@ -437,6 +476,10 @@ export function useConversation(sessionPath: string | null): ConversationApi {
       // from the end of the newest turn and normally stops at its last tool
       // result, and a stale plan is a worse bug than a redundant pass.
       todos: projectTodos(messagesRef.current, undeliveredPrompts),
+      // Also projected on every publish: the answered set is completed from the
+      // user messages already in the transcript, and a reply that arrived as a
+      // new turn has to close its question on the frame that carries it.
+      pendingQuestions: projectPendingQuestions(messagesRef.current),
       partial: slot ? [...slot.content] : null,
       // Recomputed rather than counted as it changes: the refs are the state,
       // and one pass over a few hundred messages is cheaper than a counter that
@@ -444,6 +487,7 @@ export function useConversation(sessionPath: string | null): ConversationApi {
       undeliveredPrompts,
       toolExecutions: { ...toolsRef.current },
       isStreaming: streamingRef.current,
+      compacting: compactingRef.current,
       loading: loadingRef.current,
       error: errorRef.current,
       retry: retryRef.current,
@@ -487,6 +531,9 @@ export function useConversation(sessionPath: string | null): ConversationApi {
     frameRef.current = requestAnimationFrame(tick);
   }, [publish]);
 
+  /**
+   * Fold one session frame into the refs.
+   */
   const handleEvent = useCallback(
     (event: SessionEvent) => {
       switch (event.type) {
@@ -678,6 +725,42 @@ export function useConversation(sessionPath: string | null): ConversationApi {
           streamingRef.current = false;
           break;
 
+        // Compaction is a model call of its own, run between the frames the
+        // transcript is made of. Without these two the wait is invisible: the
+        // turn simply stops producing tokens for half a minute, and the cut
+        // that follows would leave no trace in the conversation at all.
+        case "compaction_start":
+          compactingRef.current = true;
+          break;
+
+        case "compaction_end": {
+          compactingRef.current = false;
+          const checkpoint = compactionCheckpoint(event);
+          if (checkpoint === null) break;
+          // Appended where it happened rather than re-read from pi.
+          //
+          // A re-read would return the *compacted* context — the checkpoint
+          // first, the folded turns gone — and that is the wrong shape for the
+          // one reader who needs to see this: the transcript collapses under
+          // them, and the row explaining it lands above everything, off-screen
+          // in any session long enough to have been compacted in the first
+          // place. Recording it here instead keeps what pi folded visible above
+          // the marker and puts the marker exactly where the reader is looking.
+          // A session loaded from disk still gets the server's own copy at the
+          // top, because there the folded turns are not in the data to begin
+          // with.
+          messagesRef.current = [
+            ...messagesRef.current,
+            {
+              role: "compactionSummary",
+              summary: checkpoint.summary,
+              tokensBefore: checkpoint.tokensBefore,
+              timestamp: Date.now(),
+            },
+          ];
+          break;
+        }
+
         default:
           break;
       }
@@ -732,6 +815,10 @@ export function useConversation(sessionPath: string | null): ConversationApi {
     retryRef.current = null;
     retryAttemptRef.current = 0;
     failedAttemptsRef.current = 0;
+    // A compaction belongs to the session that was running it too: leaving this
+    // set would put the running row under the next session's transcript, where
+    // no `compaction_end` is ever going to arrive to clear it.
+    compactingRef.current = false;
     persistedNotifiedRef.current = false;
     // The history below belongs to the previous session until `load` says
     // otherwise; leaving this set would let a queued prompt skip the wait.

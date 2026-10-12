@@ -95,6 +95,35 @@ describe("readSessionSnapshot", () => {
     await writeFile(path, "not json at all\n", "utf8");
     expect(() => readSessionSnapshot(path)).toThrow();
   });
+
+  it("replays a compaction as the summary plus what the cut kept", async () => {
+    // The UI renders its compaction row from this message, so the assumption
+    // worth locking is that `buildSessionContext()` keeps the checkpoint and
+    // drops everything before it — the summary does not sit beside the turns it
+    // replaced, it replaces them.
+    const path = await writeSession(dir, [
+      HEADER,
+      message("m1", null, "user", "the old question"),
+      message("m2", "m1", "assistant", "the old answer"),
+      message("m3", "m2", "user", "the recent question"),
+      {
+        type: "compaction",
+        id: "c1",
+        parentId: "m3",
+        timestamp: "2026-01-01T00:00:09.000Z",
+        summary: "what the old turns said",
+        firstKeptEntryId: "m3",
+        tokensBefore: 324_210,
+      },
+    ]);
+
+    const { messages } = readSessionSnapshot(path);
+    expect(messages.map((entry) => entry.role)).toEqual(["compactionSummary", "user"]);
+    expect(messages[0]).toMatchObject({
+      summary: "what the old turns said",
+      tokensBefore: 324_210,
+    });
+  });
 });
 
 

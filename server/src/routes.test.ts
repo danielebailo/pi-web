@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventBus } from "./bus.ts";
 import { resetDefaultComposerCache } from "./composer.ts";
+import { resetSessionOpenCache } from "./session-open.ts";
 import { SessionRegistry } from "./registry.ts";
 import { createRequestHandler } from "./routes.ts";
 import { sessionDirFor } from "./session-path.ts";
@@ -42,6 +43,9 @@ beforeEach(async () => {
   await rm(join(home, "store.json"), { force: true });
   const store = await import("./store.ts");
   store.resetStoreCache();
+  // Both are process-wide and keyed by file, so a test that rewrites a session
+  // must not read an earlier test's parse.
+  resetSessionOpenCache();
 
   registry = new SessionRegistry({ cliPath: STUB_CLI });
   bus = new EventBus();
@@ -183,6 +187,29 @@ describe("workspace files api", () => {
     const project = await createProject("no-path");
     const res = await api(`/api/projects/${project.id}/file`);
     expect(res.status).toBe(400);
+  });
+
+  it("searches the project for an @ completion query", async () => {
+    const project = await createProject("search");
+    await mkdir(join(project.path, "src/lib"), { recursive: true });
+    await writeFile(join(project.path, "src/lib/api.ts"), "", "utf8");
+    await writeFile(join(project.path, "README.md"), "", "utf8");
+
+    const res = await api(`/api/projects/${project.id}/files/search?q=api`);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.query).toBe("api");
+    expect(res.body.items.map((item: any) => item.path)).toContain("src/lib/api.ts");
+  });
+
+  it("bounds a search by limit and reports the cut", async () => {
+    const project = await createProject("search-limit");
+    await writeFile(join(project.path, "api.ts"), "", "utf8");
+    await writeFile(join(project.path, "api.test.ts"), "", "utf8");
+
+    const res = await api(`/api/projects/${project.id}/files/search?q=api&limit=1`);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.items).toHaveLength(1);
+    expect(res.body.truncated).toBe(true);
   });
 });
 
@@ -407,6 +434,75 @@ describe("sessions api", () => {
   it("rejects a session path that is not a jsonl file", async () => {
     const res = await api(`/api/sessions/${encodeURIComponent(join(sessionRoot, "notes.txt"))}/messages`);
     expect(res.status).toBe(400);
+  });
+
+  it("hands a tool result's image out as a URL and serves the bytes from it", async () => {
+    // The transcript no longer drags every screenshot of a session along with
+    // it: a tool result's pictures come back addressed, and the browser fetches
+    // the ones it renders. A user's own picture keeps its bytes, because a retry
+    // re-sends them to pi (see `session-images.ts`).
+    const sessionPath = join(sessionRoot, "--images--", "images.jsonl");
+    await mkdir(dirname(sessionPath), { recursive: true });
+    await writeFile(
+      sessionPath,
+      [
+        { type: "session", version: 3, id: "images-session", timestamp: "2026-01-01T00:00:00.000Z", cwd: projectRoot },
+        {
+          type: "message",
+          id: "u1",
+          parentId: null,
+          timestamp: "2026-01-01T00:00:01.000Z",
+          message: {
+            role: "user",
+            content: [
+              { type: "text", text: "看看" },
+              { type: "image", data: "dXNlcg==", mimeType: "image/png" },
+            ],
+          },
+        },
+        {
+          type: "message",
+          id: "t1",
+          parentId: "u1",
+          timestamp: "2026-01-01T00:00:02.000Z",
+          message: {
+            role: "toolResult",
+            toolCallId: "c1",
+            toolName: "read",
+            content: [{ type: "image", data: "aGVsbG8=", mimeType: "image/png" }],
+            isError: false,
+            timestamp: 2,
+          },
+        },
+      ]
+        .map((entry) => `${JSON.stringify(entry)}\n`)
+        .join(""),
+      "utf8",
+    );
+    const url = `/api/sessions/${encodeURIComponent(sessionPath)}/messages`;
+
+    const res = await api<{ messages: { role: string; content: Record<string, unknown>[] }[] }>(url);
+    expect(res.status).toBe(200);
+
+    const userImage = res.body.messages.find((entry) => entry.role === "user")!.content[1]!;
+    expect(userImage).toMatchObject({ type: "image", data: "dXNlcg==", mimeType: "image/png" });
+
+    const toolImage = res.body.messages.find((entry) => entry.role === "toolResult")!.content[0]!;
+    expect(toolImage.data).toBeUndefined();
+    expect(toolImage).toMatchObject({ type: "image", mimeType: "image/png" });
+    const imageUrl = toolImage.url as string;
+    // The ordinal counts the user's image too, so the tool's is #1.
+    expect(imageUrl).toContain("/image/1?v=");
+
+    const image = await fetch(baseUrl + imageUrl);
+    expect(image.status).toBe(200);
+    expect(image.headers.get("content-type")).toBe("image/png");
+    expect(image.headers.get("cache-control")).toContain("immutable");
+    expect(Buffer.from(await image.arrayBuffer()).toString("utf8")).toBe("hello");
+
+    // An ordinal is only meaningful for the file version it was named with.
+    const stale = await fetch(`${baseUrl}${imageUrl.replace(/v=.*$/, "v=0")}`);
+    expect(stale.status).toBe(404);
   });
 
   it("404s an unknown project id", async () => {

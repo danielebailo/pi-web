@@ -12,7 +12,7 @@ import {
   addImages,
   fitScale,
   imageBlocksOf,
-  imageDataUrl,
+  imageSource,
   isAcceptedImageType,
   isImageBlock,
   refusalNotice as refusalNoticeOf,
@@ -23,15 +23,25 @@ function image(data: string, mimeType = "image/png"): ImageBlock {
   return { type: "image", data, mimeType };
 }
 
+/** What the server sends for a tool result's picture: no bytes, a URL. */
+function linked(url: string, mimeType = "image/png"): ImageBlock {
+  return { type: "image", mimeType, url };
+}
+
 describe("isImageBlock", () => {
   it("accepts a well-formed image block", () => {
     expect(isImageBlock({ type: "image", data: "AAAA", mimeType: "image/png" })).toBe(true);
   });
 
+  it("accepts one that carries a URL instead of bytes", () => {
+    expect(isImageBlock({ type: "image", url: "/api/x", mimeType: "image/png" })).toBe(true);
+  });
+
   it("rejects blocks an older session file may have left half-written", () => {
     // The transcript comes off disk, so the check is structural rather than a
-    // cast: an empty `data` would render as a broken <img>.
+    // cast: an empty `data` or `url` would render as a broken <img>.
     expect(isImageBlock({ type: "image", data: "", mimeType: "image/png" })).toBe(false);
+    expect(isImageBlock({ type: "image", url: "", mimeType: "image/png" })).toBe(false);
     expect(isImageBlock({ type: "image", data: "AAAA" })).toBe(false);
     expect(isImageBlock({ type: "image", mimeType: "image/png" })).toBe(false);
     expect(isImageBlock({ type: "text", text: "hi" })).toBe(false);
@@ -55,9 +65,15 @@ describe("imageBlocksOf", () => {
   });
 });
 
-describe("imageDataUrl", () => {
+describe("imageSource", () => {
   it("adds the prefix the <img> needs and nothing else", () => {
-    expect(imageDataUrl(image("AAAA", "image/webp"))).toBe("data:image/webp;base64,AAAA");
+    expect(imageSource(image("AAAA", "image/webp"))).toBe("data:image/webp;base64,AAAA");
+  });
+
+  it("uses the URL when the block was addressed rather than inlined", () => {
+    expect(imageSource(linked("/api/sessions/x/image/0?v=7"))).toBe(
+      "/api/sessions/x/image/0?v=7",
+    );
   });
 });
 

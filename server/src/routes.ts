@@ -45,6 +45,7 @@ import {
   readWorkspaceTextPage,
   listWorkspaceDirectory,
 } from "./workspace-files.ts";
+import { DEFAULT_LIMIT, searchWorkspaceFiles } from "./file-search.ts";
 import { TerminalManager, type TerminalHost } from "./terminal.ts";
 import { pendingUiRequests, type PendingUiRequests } from "./ui-requests.ts";
 import {
@@ -83,6 +84,11 @@ import { type SessionHandle, type SessionRegistry, type SlashCommand } from "./r
 import { deleteSession } from "./session-delete.ts";
 import { assertAllowedSessionPath, getSessionRoot, sessionDirFor } from "./session-path.ts";
 import { readSessionSnapshot } from "./session-reader.ts";
+import {
+  readSessionImage,
+  sessionImageVersion,
+  withToolResultImageUrls,
+} from "./session-images.ts";
 import { setSessionTitle } from "./session-title.ts";
 import { listSessions } from "./sessions.ts";
 import {
@@ -1166,6 +1172,23 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
   });
 
   /**
+   * Paths under a project matching an in-progress `@` query, for the composer's
+   * file completion.
+   *
+   * A sibling of `/files` rather than a mode on it: the two answer different
+   * questions — one directory level for the sidebar's tree, one flat search over
+   * the whole project for a menu that has to fill from a single keystroke. The
+   * index it searches is git's own file list where there is a repository, which
+   * is also what keeps ignored files out of the menu.
+   */
+  route("GET", "/api/projects/:id/files/search", async ({ res, params, query }) => {
+    const project = await getProject(params.id!);
+    const requested = Number(query.get("limit") ?? String(DEFAULT_LIMIT));
+    const limit = Number.isFinite(requested) ? requested : DEFAULT_LIMIT;
+    json(res, 200, await searchWorkspaceFiles(project.path, query.get("q") ?? "", limit));
+  });
+
+  /**
    * One file for the right sidebar's preview tab: text, an image as base64, or
    * a PDF by reference.
    *
@@ -1396,12 +1419,56 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
     } catch (err) {
       throw notFound(`无法读取会话：${(err as Error).message}`);
     }
+    // The file's version is read *before* the snapshot, so a file that changed
+    // underneath us produces URLs whose version no longer matches — a 404 the UI
+    // heals on its next reload, rather than an ordinal pointing at the wrong
+    // picture. A live session keeps its images inline instead: its transcript
+    // comes from pi's memory and may hold turns the file has never seen, which
+    // no URL could point at.
+    const version = sessionImageVersion(sessionPath);
+    const messages =
+      version === null
+        ? snapshot.messages
+        : withToolResultImageUrls(snapshot.messages, sessionPath, version);
     json(res, 200, {
       sessionPath,
       sessionId: snapshot.sessionId,
-      messages: snapshot.messages,
+      messages,
       forkPoints: snapshot.forkPoints,
     });
+  });
+
+  /**
+   * One image from a session's transcript, by its position in the file.
+   *
+   * The transcript hands its tool-result pictures out as these URLs (see
+   * `session-images.ts`), so a switch no longer ships every screenshot of a
+   * session in one response. Addressed by ordinal plus the file's mtime, which
+   * makes the bytes immutable under this URL and lets the browser keep them; a
+   * request carrying an older version than the file currently has is refused
+   * rather than answered with whatever now sits at that position.
+   */
+  route("GET", "/api/sessions/:id/image/:index", async ({ res, params, query }) => {
+    const sessionPath = allowedPath(params.id!);
+    const index = Number(params.index);
+    if (!Number.isSafeInteger(index) || index < 0) throw notFound("图片不存在");
+    const version = query.get("v");
+    if (version !== null && sessionImageVersion(sessionPath) !== version) {
+      throw notFound("图片不存在");
+    }
+    const image = readSessionImage(sessionPath, index);
+    if (image === null) throw notFound("图片不存在");
+    const bytes = Buffer.from(image.data, "base64");
+    res.writeHead(200, {
+      "content-type": image.mimeType,
+      "content-length": bytes.byteLength,
+      // The URL names a file version, so these bytes can never change under it.
+      "cache-control": "private, max-age=31536000, immutable",
+      // The type above is a promise about the bytes, and a body that is not
+      // really that image must not be allowed to say otherwise.
+      "x-content-type-options": "nosniff",
+    });
+    res.end(bytes);
   });
 
   /**
@@ -1786,8 +1853,11 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
    */
   route("POST", "/api/ui-requests/:id/response", async ({ res, params, body }) => {
     const payload = asObject(body);
-    const answered = await uiRequests.answer(params.id!, payload);
-    if (!answered) throw notFound("no dialog is waiting under that id");
+    const outcome = await uiRequests.answer(params.id!, payload);
+    if (outcome === "unknown") throw notFound("no dialog is waiting under that id");
+    // The card is still on screen and still answerable, so this is a rejected
+    // attempt rather than a settled question: the entry stays pending.
+    if (outcome === "invalid") throw badRequest("that dialog cannot read this answer");
     json(res, 200, { ok: true });
   });
 

@@ -42,6 +42,7 @@ import {
   type SessionContext,
 } from "@earendil-works/pi-coding-agent";
 import { readModelCatalog, type ModelCatalog } from "./models.ts";
+import { openSessionForRead } from "./session-open.ts";
 
 /** One selectable model, with just the fields the input bar renders. */
 export interface ComposerModel {
@@ -298,7 +299,9 @@ export async function readComposerFromDisk(
   sessionPath: string,
   catalog?: ModelCatalog,
 ): Promise<ComposerState> {
-  const manager = SessionManager.open(sessionPath);
+  // Shared with `readSessionSnapshot`, which a switch fires in the same moment:
+  // both used to parse this file themselves (see `session-open.ts`).
+  const manager = openSessionForRead(sessionPath);
   const models = catalog ?? (await readModelCatalog());
   const change = lastModelChange(manager);
 

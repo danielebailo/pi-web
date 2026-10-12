@@ -33,9 +33,9 @@ function userText(index) {
   return `第 ${index} 轮：解释一下 ${PARAGRAPHS[index % PARAGRAPHS.length]}`;
 }
 
-function assistantText(index) {
+function assistantText(index, label = "") {
   const body = [
-    `### 回答 ${index}`,
+    `### 回答 ${index}${label}`,
     "",
     PARAGRAPHS[(index + 1) % PARAGRAPHS.length],
     "",
@@ -48,14 +48,38 @@ function assistantText(index) {
   return body;
 }
 
+/** A fake but plausibly-shaped base64 blob, for measuring payload cost. */
+const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+function fakeBase64(chars) {
+  let out = "";
+  for (let i = 0; i < chars; i += 1) out += B64[(i * 7 + 3) % B64.length];
+  return out;
+}
+
 /**
  * 写一个会话文件。`turns` 为来回轮数，每条 = user + assistant，
  * 所以最终消息数是 turns * 2。
  */
-export function writeSessionFile(dir, { fileName, id, cwd, turns, startedAt = Date.now() }) {
+export function writeSessionFile(
+  dir,
+  {
+    fileName,
+    id,
+    cwd,
+    turns,
+    startedAt = Date.now(),
+    /** Appended to every assistant reply, so a caller can spot this session's text. */
+    label = "",
+    /** Add a fake base64 image to every Nth user message (0 = none). */
+    imageEvery = 0,
+    /** How many base64 characters each fake image carries. */
+    imageChars = 0,
+  },
+) {
   const rows = [JSON.stringify({ type: "session", version: 3, id, timestamp: new Date(startedAt).toISOString(), cwd })];
   let parentId = null;
   let at = startedAt;
+  const image = fakeBase64(imageChars);
 
   for (let index = 1; index <= turns; index += 1) {
     const userId = `u${index}`;
@@ -68,9 +92,19 @@ export function writeSessionFile(dir, { fileName, id, cwd, turns, startedAt = Da
         id: userId,
         parentId,
         timestamp: userIso,
-        message: { role: "user", content: userText(index), timestamp: Date.parse(userIso) },
+        message: {
+          role: "user",
+          content: userText(index),
+          timestamp: Date.parse(userIso),
+        },
       }),
     );
+
+    // Images ride in a tool result, which is where a real session's weight is:
+    // a screenshot a `read` returned, and the one the transcript now hands out
+    // as a URL instead of inline (see `server/src/session-images.ts`).
+    const withImage = imageEvery > 0 && index % imageEvery === 0;
+    const callId = `call-${index}`;
     const assistantIso = new Date(at).toISOString();
     at += 1000;
     rows.push(
@@ -81,12 +115,41 @@ export function writeSessionFile(dir, { fileName, id, cwd, turns, startedAt = Da
         timestamp: assistantIso,
         message: {
           role: "assistant",
-          content: [{ type: "text", text: assistantText(index) }],
+          content: withImage
+            ? [
+                { type: "toolCall", id: callId, name: "read", arguments: { path: `shot-${index}.png` } },
+                { type: "text", text: assistantText(index, label) },
+              ]
+            : [{ type: "text", text: assistantText(index, label) }],
           timestamp: Date.parse(assistantIso),
         },
       }),
     );
-    parentId = assistantId;
+
+    if (withImage) {
+      const toolId = `t${index}`;
+      const toolIso = new Date(at).toISOString();
+      at += 1000;
+      rows.push(
+        JSON.stringify({
+          type: "message",
+          id: toolId,
+          parentId: assistantId,
+          timestamp: toolIso,
+          message: {
+            role: "toolResult",
+            toolCallId: callId,
+            toolName: "read",
+            content: [{ type: "image", mimeType: "image/png", data: image }],
+            isError: false,
+            timestamp: Date.parse(toolIso),
+          },
+        }),
+      );
+      parentId = toolId;
+    } else {
+      parentId = assistantId;
+    }
   }
 
   mkdirSync(dir, { recursive: true });

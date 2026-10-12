@@ -1,7 +1,8 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type {
   AgentMessage,
   AssistantMessage,
+  CompactionSummaryMessage,
   ContentBlock,
   ForkPoint,
   ImageBlock,
@@ -20,11 +21,13 @@ import { MessageActions } from "./MessageActions.tsx";
 import { ThinkingBlock } from "./ThinkingBlock.tsx";
 import { TodoRow } from "./TodoRow.tsx";
 import { ToolCallRow } from "./ToolCallRow.tsx";
+import { QuestionRow } from "./QuestionRow.tsx";
 import { TurnProcessGroup } from "./TurnProcessGroup.tsx";
 import { ChangedFilesCard } from "./ChangedFilesCard.tsx";
 import { turnFiles, type TurnFile } from "./turn-files.ts";
 import { turnChangesList, type TurnChanges } from "../rightbar/turn-changes-store.ts";
 import { RetryNotice } from "./RetryNotice.tsx";
+import { CompactionRow, CompactionRunning } from "./CompactionRow.tsx";
 import { TurnFailure } from "./TurnFailure.tsx";
 import { TurnStatus } from "./TurnStatus.tsx";
 import { TurnNavigator } from "./TurnNavigator.tsx";
@@ -32,7 +35,7 @@ import { processSegmentTitle, splitIntoProcessSegments } from "./row-model.ts";
 import { transcriptPolicyFor, type TranscriptPolicy } from "./transcript-policy.ts";
 import { StepProcessGroup } from "./StepProcessGroup.tsx";
 import { displayUserText, parseSkillCall, skillCommandLabel } from "./skill-block.ts";
-import { groupTurns } from "./turn-rail.ts";
+import { groupTurns, type RailTurn } from "./turn-rail.ts";
 import { textFromContent, type ConversationView, type ToolExecution } from "./useConversation.ts";
 import { useDelayedFlag } from "../../lib/use-delayed-flag.ts";
 import { Glyph } from "../../components/dsh-icons.tsx";
@@ -54,6 +57,28 @@ const JUMP_TOP_OFFSET_PX = 24;
 const STICK_THRESHOLD_PX = 80;
 /** Same band dsh uses to decide whether a jump landed at the bottom. */
 const AT_BOTTOM_THRESHOLD_PX = 25;
+/**
+ * How much of a freshly-opened transcript is mounted on the first commit.
+ *
+ * A session is read whole from disk, but mounting all of it at once makes the
+ * browser lay out the entire column synchronously — on an 800-turn fixture that
+ * is a ~300ms block, and it lands exactly when the reader clicked a row and is
+ * waiting for the conversation. Mounting the tail first keeps that commit small
+ * (the reader starts at the bottom anyway) and the rest is mounted in a
+ * transition; see the effect that grows the window.
+ */
+const TAIL_INITIAL_ITEMS = 24;
+/**
+ * The window once everything is mounted.
+ *
+ * Infinity rather than the current length so that a turn arriving later from the
+ * stream does not put the window back under `flow.length` — otherwise every
+ * appended message would schedule another catch-up transition for a list that is
+ * already fully mounted.
+ */
+const TAIL_FULL = Number.POSITIVE_INFINITY;
+/** Scroll the transcript this close to the mounted top and the rest mounts now. */
+const TOP_BACKFILL_PX = 160;
 
 /** Distance from the bottom edge — the one number every decision here uses. */
 function distanceFromBottom(element: HTMLElement): number {
@@ -111,8 +136,12 @@ function BlockView({
           }
         : undefined);
     // `todo` answers with a whole-list snapshot rather than a body of text, so it
-    // gets a list instead of the generic parameters-and-output card.
+    // gets a list instead of the generic parameters-and-output card; a settled
+    // question gets its own answer read back as the card it was answered in.
     if (call.name === "todo") return <TodoRow call={call} execution={execution} />;
+    if (call.name === "ask_user_question") {
+      return <QuestionRow call={call} execution={execution} cwd={cwd} home={home} />;
+    }
     return <ToolCallRow call={call} execution={execution} cwd={cwd} home={home} />;
   }
   if (block.type === "image") {
@@ -477,23 +506,37 @@ function turnMetadata(
 /**
  * The turn owning the row at a probe line measured from the scrollport top.
  *
- * Walks the anchors in document order and keeps the last one that starts above
- * the line — the same fallback dsh uses. It does not need `elementsFromPoint`:
- * turn rows are direct siblings in one column, so "last row starting above the
- * line" is exactly the row being read.
+ * Rows are direct siblings in one column, so their `top` values increase with
+ * document order and the answer is the last row at or above the line. A plain
+ * forward scan finds it but reads a `getBoundingClientRect` for every row above
+ * the line — which is all of them for a reader sitting at the bottom of a long
+ * transcript, exactly the moment a session switch lands, and the forced layout
+ * that comes with the first read then has to measure the whole freshly-mounted
+ * column. Binary search asks the same question in O(log n) reads: ~11 instead
+ * of ~1600 on a 800-turn transcript, and the same on every scroll frame.
  */
 function turnAtLine(list: HTMLElement, line: number): number | null {
-  let found: number | null = null;
-  for (const row of list.querySelectorAll<HTMLElement>("[data-turn]")) {
-    if (row.getBoundingClientRect().top > line) break;
-    const turn = Number(row.dataset.turn);
-    if (Number.isSafeInteger(turn)) found = turn;
+  const rows = list.querySelectorAll<HTMLElement>("[data-turn]");
+  let low = 0;
+  let high = rows.length - 1;
+  let found = -1;
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    if (rows[mid]!.getBoundingClientRect().top <= line) {
+      found = mid;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
   }
-  return found;
+  if (found < 0) return null;
+  const turn = Number(rows[found]!.dataset.turn);
+  return Number.isSafeInteger(turn) ? turn : null;
 }
 
 export function MessageList({
   view,
+  sessionPath,
   cwd,
   home,
   transcriptView = "detailed",
@@ -503,6 +546,12 @@ export function MessageList({
   onRetry,
 }: {
   view: ConversationView;
+  /**
+   * The session this transcript belongs to. Used only to reset the mounted-tail
+   * window when the reader switches sessions; the messages themselves come from
+   * `view`.
+   */
+  sessionPath?: string | null;
   /** Work-details presentation mode; see `transcript-policy.ts`. */
   transcriptView?: TranscriptDisplay;
   /** Fork the session at a user message. Absent means the action is not shown. */
@@ -547,6 +596,14 @@ export function MessageList({
   // A disk-backed switch finishes in ~100ms, so the hint only appears if the
   // load is genuinely slow.
   const showLoading = useDelayedFlag(view.loading);
+  /** How many trailing flow items (turns and checkpoints) are mounted. */
+  const [tailCount, setTailCount] = useState(TAIL_INITIAL_ITEMS);
+  /** Column height captured before a prepend, for the scroll compensation. */
+  const prependHeightRef = useRef<number | null>(null);
+  /** A rail jump to a turn that was not mounted yet; finished once it is. */
+  const pendingJumpTurnRef = useRef<number | null>(null);
+  /** Read by `onScroll`, which is deliberately not re-created per render. */
+  const windowedRef = useRef(false);
 
   const applyPinned = useCallback((value: boolean): void => {
     stickRef.current = value;
@@ -585,6 +642,105 @@ export function MessageList({
     () => groupTurns(view.messages, view.undeliveredPrompts),
     [view.messages, view.undeliveredPrompts],
   );
+  /**
+   * The transcript as a flow: turns interleaved with the compaction checkpoints
+   * that sit between them.
+   *
+   * This is a merge rather than a filter because a checkpoint's position *is*
+   * its position among the messages, and the two positions it can have mean two
+   * different things. A session read from disk starts with one — pi's context
+   * begins at the cut, so the turns it folded are simply not in the data — while
+   * a compaction that happens while the reader is watching lands at the tail,
+   * with everything it folded still on screen above it. Drawing every checkpoint
+   * at the top would put that second one off-screen the moment it became the
+   * thing the reader most needed to see.
+   */
+  const flow = useMemo(() => {
+    const order = new Map<AgentMessage, number>();
+    const checkpoints: { at: number; message: CompactionSummaryMessage }[] = [];
+    view.messages.forEach((message, at) => {
+      order.set(message, at);
+      if (message.role === "compactionSummary") {
+        checkpoints.push({ at, message: message as CompactionSummaryMessage });
+      }
+    });
+
+    type Item =
+      | { kind: "turn"; group: RailTurn }
+      | { kind: "checkpoint"; at: number; message: CompactionSummaryMessage };
+
+    const items: Item[] = [];
+    let next = 0;
+    for (const group of railItems) {
+      // A turn's anchor is the index of the message that opens it; `groupTurns`
+      // walks the same list in the same order, so the anchors increase.
+      const first = group.messages[0];
+      const anchor = first === undefined ? Number.MAX_SAFE_INTEGER : (order.get(first) ?? 0);
+      while (next < checkpoints.length && checkpoints[next]!.at < anchor) {
+        items.push({ kind: "checkpoint", ...checkpoints[next]! });
+        next += 1;
+      }
+      items.push({ kind: "turn", group });
+    }
+    while (next < checkpoints.length) {
+      items.push({ kind: "checkpoint", ...checkpoints[next]! });
+      next += 1;
+    }
+    return items;
+  }, [view.messages, railItems]);
+
+  /** Whether the transcript holds a compaction checkpoint of its own. */
+  const hasCheckpoint = flow.some((item) => item.kind === "checkpoint");
+
+  /**
+   * The mounted window: the last `tailCount` items of the flow.
+   *
+   * Counted from the tail rather than held as a start index so that a turn
+   * arriving from the stream is always inside the window — a growing list does
+   * not move the window off the end.
+   */
+  const windowStart = Math.max(0, flow.length - tailCount);
+  const visibleFlow = windowStart === 0 ? flow : flow.slice(windowStart);
+  windowedRef.current = windowStart > 0;
+
+  // A new session starts at the tail again. The reset is keyed on the path, not
+  // on the message list: a stream grows the list continuously and must not send
+  // the window back to the top mid-answer.
+  useEffect(() => {
+    setTailCount(TAIL_INITIAL_ITEMS);
+  }, [sessionPath]);
+
+  /**
+   * Mount the rest of the transcript once the tail is on screen.
+   *
+   * A transition, not a chain of chunks: the remaining turns are one O(n) render
+   * that React can interrupt between fibers, so the work is spread across frames
+   * without the quadratic re-render of re-mounting a few rows at a time (each of
+   * those re-rendered everything already mounted). The compensation below keeps
+   * a reader who has scrolled away where they were.
+   */
+  useEffect(() => {
+    if (tailCount >= flow.length) return;
+    startTransition(() => {
+      prependHeightRef.current = scrollRef.current?.scrollHeight ?? null;
+      setTailCount(TAIL_FULL);
+    });
+  }, [tailCount, flow.length]);
+
+  /**
+   * Keep a reader who is not following the tail where they were when earlier
+   * turns are mounted above them. A pinned reader is left to the ResizeObserver,
+   * which puts it back at the bottom instead.
+   */
+  useLayoutEffect(() => {
+    const before = prependHeightRef.current;
+    prependHeightRef.current = null;
+    const scroller = scrollRef.current;
+    if (before === null || scroller === null || stickRef.current) return;
+    const grown = scroller.scrollHeight - before;
+    if (grown > 0) scroller.scrollTop += grown;
+  }, [tailCount]);
+
   /**
    * Each turn's written files, keyed by turn number.
    *
@@ -763,6 +919,15 @@ export function MessageList({
     if (!element) return;
     const distance = distanceFromBottom(element);
 
+    // Reading upward has run out of mounted transcript. Mount the rest now
+    // rather than let the reader hit a wall: they asked to go there, so the
+    // idle catch-up is not the right owner of this decision. The captured
+    // height lets the prepend compensation keep their place when it lands.
+    if (windowedRef.current && element.scrollTop < TOP_BACKFILL_PX) {
+      prependHeightRef.current = element.scrollHeight;
+      setTailCount(TAIL_FULL);
+    }
+
     if (jumpingRef.current) {
       // A jump passes through every offset on the way down. Judging "pinned"
       // from those would put the button back on screen mid-flight and unpin the
@@ -806,24 +971,52 @@ export function MessageList({
   };
 
   /**
-   * Scroll a turn's row to just below the top of the scrollport.
+   * Scroll a turn's row to just below the top of the scrollport, if it is
+   * mounted. Returns false when the row is outside the mounted window.
    *
    * `scrollTop +=` rather than `scrollIntoView`, because `scrollIntoView` cannot
    * leave a fixed offset above the row and would put the anchor flush against
    * the pane edge.
    */
-  const navigateToTurn = useCallback((turn: number): void => {
-    const scroller = scrollRef.current;
-    if (scroller === null) return;
-    const row = scroller.querySelector<HTMLElement>(`[data-turn="${String(turn)}"]`);
-    if (row === null) return;
-    const rowTop = row.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
-    scroller.scrollTop += rowTop - JUMP_TOP_OFFSET_PX;
-    // Landing at the end should resume following; landing mid-transcript must
-    // not, or the next streaming delta would yank the reader back down.
-    applyPinned(distanceFromBottom(scroller) <= AT_BOTTOM_THRESHOLD_PX);
-    setActiveTurn(turn);
-  }, [applyPinned]);
+  const landOnTurn = useCallback(
+    (turn: number): boolean => {
+      const scroller = scrollRef.current;
+      if (scroller === null) return false;
+      const row = scroller.querySelector<HTMLElement>(`[data-turn="${String(turn)}"]`);
+      if (row === null) return false;
+      const rowTop = row.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+      scroller.scrollTop += rowTop - JUMP_TOP_OFFSET_PX;
+      // Landing at the end should resume following; landing mid-transcript must
+      // not, or the next streaming delta would yank the reader back down.
+      applyPinned(distanceFromBottom(scroller) <= AT_BOTTOM_THRESHOLD_PX);
+      setActiveTurn(turn);
+      return true;
+    },
+    [applyPinned],
+  );
+
+  /**
+   * The rail's jump. A turn above the mounted window has to be mounted first,
+   * then the jump is finished by the effect below — the reader asked to go
+   * there, so the window grows to include it immediately rather than waiting on
+   * the background catch-up.
+   */
+  const navigateToTurn = useCallback(
+    (turn: number): void => {
+      if (landOnTurn(turn)) return;
+      const index = flow.findIndex((item) => item.kind === "turn" && item.group.turn === turn);
+      if (index < 0) return;
+      pendingJumpTurnRef.current = turn;
+      setTailCount((count) => Math.max(count, flow.length - index));
+    },
+    [landOnTurn, flow],
+  );
+
+  useLayoutEffect(() => {
+    const turn = pendingJumpTurnRef.current;
+    if (turn === null) return;
+    if (landOnTurn(turn)) pendingJumpTurnRef.current = null;
+  }, [tailCount, landOnTurn]);
 
   const partial = view.partial;
   const hasPartial = partial !== null && partial.length > 0;
@@ -863,11 +1056,27 @@ export function MessageList({
       <div className={styles.column} ref={columnRef}>
         {showLoading ? <p className={styles.hint}>{t("message.loading")}</p> : null}
 
-        {!view.loading && railItems.length === 0 && !hasPartial ? (
+        {/* A checkpoint alone is not an empty session: it is what the context
+            starts with, and the row below says so. */}
+        {!view.loading && railItems.length === 0 && !hasCheckpoint && !hasPartial ? (
           <p className={styles.hint}>{t("message.empty")}</p>
         ) : null}
 
-        {railItems.map((group) => {
+        {visibleFlow.map((item) => {
+          // The cut, drawn where it sits among the turns: a checkpoint pi
+          // replayed lands first (the context begins there), the one a live
+          // compaction just made lands last, under everything it folded.
+          if (item.kind === "checkpoint") {
+            return (
+              <CompactionRow
+                key={`compaction-${String(item.at)}`}
+                summary={item.message.summary}
+                tokensBefore={item.message.tokensBefore}
+                timestamp={item.message.timestamp}
+              />
+            );
+          }
+          const group = item.group;
           // Flatten the turn's assistant content so compact mode can group the
           // *turn's* process steps. A turn spans one assistant message per tool
           // round-trip, so grouping per message produced a group per round-trip.
@@ -1048,6 +1257,11 @@ export function MessageList({
             home={home}
           />
         ) : null}
+
+        {/* The compaction pi is writing right now. Above the turn's own running
+            label: it is the thing that is happening, and the label below is the
+            turn it is happening inside of. */}
+        {view.compacting ? <CompactionRunning /> : null}
 
         {/*
          * dsh keeps this label up for the whole turn — before the first token,

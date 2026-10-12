@@ -29,10 +29,16 @@ cd server && LOAD_EVENTS=4000 LOAD_BATCH=1 LOAD_INTERVAL_MS=4 \
 cd server && LOAD_EVENTS=2000 ./node_modules/.bin/tsx ../bench/scenario-c-frontend.ts
 # LOAD_EVENTS 必须显式给：scenario-c 也会把它传给 load-stub，而 load-stub 自己的默认是 20000。
 # C_DEV=1 用 vite dev 跑，函数名可读，只用于归因；数字以生产构建为准
+
+# 场景 D：切换会话的加载成本（真实 Chrome + 生产构建，先 build）
+cd server && ./node_modules/.bin/tsx ../bench/scenario-d-switch.ts
+D_TURNS=800 ./node_modules/.bin/tsx ../bench/scenario-d-switch.ts           # 长会话
+D_TURNS=200 D_IMAGE_EVERY=20 D_IMAGE_KB=1500000 \
+  ./node_modules/.bin/tsx ../bench/scenario-d-switch.ts                     # 带 base64 图片的会话
 ```
 
 原始数据落在 `bench/results/*.json`；场景 A 的工作目录是 `bench/.bench-tmp/`（已 gitignore）。
-两个脚本都不调用任何模型，零成本、可复现。
+四个脚本都不调用任何模型，零成本、可复现。
 
 ## 场景 A：多会话 = 多进程
 
@@ -117,6 +123,50 @@ partial 会一直长到几万字符 —— 这正是「解析成本随文本增�
 对照实验（历史 0 轮 vs 20 轮）显示当前会话的忙时间只差约 7%，所以瓶颈**不是**历史消息的重渲染，而是
 **流式 partial 的反复解析**。
 
+## 场景 D：切换会话的加载成本（真实 Chrome）
+
+切会话是另一条常走的链路，和流式共用「主线程渲染」这一段，但触发点不同：一次点击、一个整条转录的挂载，
+外加服务端两条请求（`/messages` 与 `/composer`）——后者各自 `SessionManager.open()` 同步解析同一个 JSONL。
+用真实前端产物 + 真实 Chrome 量「点击 → 主线程画出一帧」（比看到 DOM 文字更接近用户感知），
+同时量两个接口的耗时。
+
+```bash
+pnpm --filter @pi-web-simple/web build
+cd server && ./node_modules/.bin/tsx ../bench/scenario-d-switch.ts
+# 量大会话：D_TURNS=800；量带图会话：D_IMAGE_EVERY=20 D_IMAGE_KB=1500000
+```
+
+| 场景 | 首帧（改前→改后） | 首屏 longtask（改前→改后） | 全量挂载（改前→改后） |
+|---|---|---|---|
+| 250 轮（接近真实中位） | 148ms → 129ms | **102ms → 0** | 199ms → 916ms |
+| 800 轮 | 377ms → 159ms | **285ms → 0** | 543ms → 1819ms |
+| 200 轮 + 15MB 工具图 | 280ms → 133ms | 0 → 0 | 1068ms → 818ms |
+
+改动：`MessageList` 首屏只挂**尾部** `TAIL_INITIAL_ITEMS = 24` 个 flow 项，其余在 `startTransition` 里补齐
+（可被滚动/输入打断；首屏小，`getBoundingClientRect` 触发的强制布局就小）；往上滚到已挂载区顶部时
+立刻把剩余部分全部挂上（`TOP_BACKFILL_PX`），并做 `scrollTop` 补偿，不会把读者甩走；导轨跳转会先把目标轮次
+挂上再滚。`turnAtLine` 从「从前往后逐个 `getBoundingClientRect`」改成二分（读 ~11 个矩形而不是 ~1600 个）。
+
+数字读法：**首屏 longtask 归零**是关键——改前那一下 80–290ms 的同步阻塞就是用户说的「卡」。
+全量挂载变晚（背景补齐）是有意为之：读者本来就停在底部，补到屏外的东西不该占住这一帧。
+
+服务端那两条请求现在共用一次解析（`server/src/session-open.ts`）：一次切会话同时发 `/messages` 与 `/composer`，
+两边本来各自 `SessionManager.open()` 同一个文件，那个解析就跑了两遍。缓存按「文件大小 + mtime（纳秒）+ 1.5s 存活」
+判定，至多存 2 份（一份 manager 大约等于它解析的文件大小，所以只为了共用一次切换、不当转录缓存用）。带图档实测：
+`/composer` 37ms → 1ms，重复切回同一会话时那一对 160ms → 95ms（`/messages` 也不再重复解析，只剩序列化）；
+纯文本会话本来就只要几毫秒，基本不变。
+
+工具结果里的图片也不再随转录一起传（`server/src/session-images.ts`）：转录把**工具结果**的图换成 URL
+（`/api/sessions/<id>/image/<序号>?v=<mtime>`），由浏览器按需取（`ImageThumb` 本来就带 `loading="lazy"`），
+端点按序号从文件重新取字节（走 `session-open.ts` 那份刚热过的解析）。带图档实测：`/messages`
+**15.2MB → 0.2MB**、92ms → **1ms**，冷启动那一对 161ms → 44ms，首帧 280ms → **133ms**。
+
+带的图片画一个圈：序号是「在转录里第几张图」，两边都按 `buildSessionContext().messages` 的顺序数，所以一致；
+URL 随文件 mtime 变，响应因此带 `immutable`、可被浏览器长期缓存，旧版本号的请求直接 404 而不是
+把新文件同位置的图回给旧转录。**用户消息的图仍内联**：一轮失败可以重试，重试会把 prompt 自带的图重发给 pi，
+而 pi 要的是 base64；这条路上字节从未离开消息。常驻会话也不重写：它的转录来自 pi 内存、可能含尚未落盘的轮次，
+URL 指不过去。
+
 ## 这些数字在真实负载下意味着什么
 
 load-stub 的 20k events/s/会话是刻意压到上限的。真实模型流式输出通常是每秒几十到几百个 delta，8 会话并发约 1k events/s 量级，比场景 B 已经验证过「零积压」的 130k events/s 低两个数量级。所以：
@@ -133,12 +183,15 @@ load-stub 的 20k events/s/会话是刻意压到上限的。真实模型流式�
 1. **SSE 按会话订阅**：`POST /api/events/subscription` 声明读的是哪个会话，`wantsFrame` 丢掉其余会话的高频帧。前端本来也只渲染当前会话，之前却让每个客户端复制全部会话的全部事件——这是扇出膨胀的主因，也顺带省掉前端对海量无关事件的 `JSON.parse`。
 2. **背压处理**：`res.write` 返回 false 时暂停对该连接的投递，排队等 `drain`。
 3. **每连接缓冲上限**：`SSE_MAX_BUFFERED_BYTES`（默认 4MB）之上主动断开，前端 `EventSource` 重连后重读快照。
+4. **切会话只挂尾部、其余在 transition 里补齐**（场景 D）：首屏那一下同步布局从小几百毫秒降到几十毫秒，长会话的 80–290ms 阻塞不再落在点击后那一帧上。
+5. **`turnAtLine` 改二分**：把「从前往后逐个读 `getBoundingClientRect`」从 O(轮数) 降到 O(log 轮数)，每帧滚动都省。
+6. **一次切换共用一次 JSONL 解析**（`session-open.ts`）：`/messages` 与 `/composer` 不再各自 `SessionManager.open()` 同一个文件；按文件大小 + mtime 判定，至多存 2 份、1.5s 过期。
 
 仍可改进：
 
-4. 多工作区这一侧（`watch.ts` 每项目一个 `fs.watch`、`sessions.ts` 每项目一次目录签名 + 缓存未命中时一次 `SessionManager.list`）本次未压测；从代码看成本是 O(项目数)、非递归、单层，在几十个项目规模内可忽略。
-5. **流式 Markdown 的解析成本**（当前会话 1.19 ms/事件的主因）：每个 delta 都用累计后的 partial 文本调一次 `react-markdown`。已有 rAF 合并，但仍可进一步按时间窗节流，或对已固定的前缀做缓存，避免每帧重新解析整段。
-6. `distanceFromBottom` 已从 render 期间移进 `useLayoutEffect`（`MessageList.tsx`），强制布局只在提交后发生一次；进一步可以换成 `ResizeObserver` 缓存。
+7. **工具结果图片按 URL 懒加载**（`session-images.ts`）：转录把工具结果里的图换成带文件版本号的 URL，浏览器按需取；用户消息的图仍内联（重试要重发字节），常驻会话也不重写（可能含未落盘的轮次）。场景 D 带图档 `/messages` 15.2MB → 0.2MB。
+8. 多工作区这一侧（`watch.ts` 每项目一个 `fs.watch`、`sessions.ts` 每项目一次目录签名 + 缓存未命中时一次 `SessionManager.list`）本次未压测；从代码看成本是 O(项目数)、非递归、单层，在几十个项目规模内可忽略。
+9. **流式 Markdown 的解析成本**（当前会话 1.19 ms/事件的主因）：每个 delta 都用累计后的 partial 文本调一次 `react-markdown`。已有 rAF 合并，但仍可进一步按时间窗节流，或对已固定的前缀做缓存，避免每帧重新解析整段。
 
 ## 尚未覆盖
 

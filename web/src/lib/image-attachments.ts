@@ -2,15 +2,18 @@ import type { ContentBlock, ImageBlock } from "./types.ts";
 import type { Translate } from "./i18n/index.ts";
 
 /**
- * Images, in the one shape every layer already agrees on.
+ * Images, in pi's own shape plus the one the transcript hands back by URL.
  *
  * pi calls it `ImageContent { type, data, mimeType }`: bare base64, no `data:`
  * prefix. The same object is what the model receives, what the RPC layer
  * serializes, and what a session file stores — so nothing here converts
  * anything. An image read off the clipboard is an `ImageBlock`, goes out as
- * one, and comes back after a reload as the identical object. The only
- * conversion that ever happens is to a `data:` URL, and that lives at the
- * single point of rendering (see `imageDataUrl`).
+ * one, and comes back after a reload as the identical object. **One case comes
+ * back addressed instead**: a tool result's picture, whose bytes stay in the
+ * session file while the block carries a `url` the browser fetches when the row
+ * renders (the server's `session-images.ts`). The only conversion that ever
+ * happens is to a `src`, and that lives at the single point of rendering (see
+ * `imageSource`).
  *
  * The file reads use `FileReader`, so this module is browser-only; the
  * decisions around them are pure so they can be tested without a DOM.
@@ -26,18 +29,18 @@ export function imageBlocksOf(content: string | ContentBlock[]): ImageBlock[] {
  * A structural check rather than a `type` comparison.
  *
  * The transcript arrives from a session file that any version of pi may have
- * written, so an image block is only worth rendering if it actually carries the
- * two strings the `<img>` needs. A half-written block is skipped instead of
- * producing a broken element.
+ * written, so an image block is only worth rendering if the `<img>` has
+ * something to load: either inline base64 or a URL to fetch it from. A
+ * half-written block is skipped instead of producing a broken element. (A tool
+ * result's picture comes back as a URL; a user's own does not — see `url`.)
  */
 export function isImageBlock(value: unknown): value is ImageBlock {
   if (typeof value !== "object" || value === null) return false;
-  const block = value as { type?: unknown; data?: unknown; mimeType?: unknown };
+  const block = value as { type?: unknown; data?: unknown; url?: unknown; mimeType?: unknown };
+  if (block.type !== "image" || typeof block.mimeType !== "string") return false;
   return (
-    block.type === "image" &&
-    typeof block.data === "string" &&
-    block.data.length > 0 &&
-    typeof block.mimeType === "string"
+    (typeof block.data === "string" && block.data.length > 0) ||
+    (typeof block.url === "string" && block.url.length > 0)
   );
 }
 
@@ -108,9 +111,9 @@ export function isAcceptedImageType(mimeType: string): boolean {
   return (ACCEPTED_IMAGE_MIME_TYPES as readonly string[]).includes(mimeType);
 }
 
-/** The `src` for an image block. The only place the prefix is ever added. */
-export function imageDataUrl(image: ImageBlock): string {
-  return `data:${image.mimeType};base64,${image.data}`;
+/** The `src` for an image block. The only place either form is turned into one. */
+export function imageSource(image: ImageBlock): string {
+  return image.url ?? `data:${image.mimeType};base64,${image.data ?? ""}`;
 }
 
 /** Why an image was refused, in the words the composer shows. */
