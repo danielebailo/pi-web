@@ -209,7 +209,7 @@ function requireChoice<T extends string>(
  * Out-of-range font sizes are rejected rather than clamped. A settings field
  * that quietly stores a different number than the one that was typed is worse
  * than one that refuses the write, and the UI never offers an invalid value in
- * the first place. Bounds mirror dsh's theme schema (12..17).
+ * the first place. Bounds mirror dsh's theme schema (10..22).
  */
 function requireFontSize(value: unknown): number {
   if (

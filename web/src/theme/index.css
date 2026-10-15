@@ -16,22 +16,23 @@
 @import "./shiki.css";
 
 :root {
-  /* In dsh this is written by the theme bootstrap at runtime; every consumer of
-   * it reads the token with a 14px fallback. Pin it so layout does not depend on
-   * a missing runtime value. The settings page writes it as an inline property
-   * on `documentElement`, which outranks this declaration.
+  /* In dsh this is written at runtime by the theme bootstrap's body script and
+   * then by the layout's ThemePresenter; every consumer reads the token with a
+   * 14px fallback. Pin it so layout does not depend on a missing runtime value.
+   * The settings page writes it as an inline property, which outranks this
+   * declaration.
    *
-   * The value is 15, not dsh's own default of 14: this project's schema default
-   * lives in `server/src/store.ts` (`FONT_SIZE_DEFAULT`) and the two must agree,
-   * because this declaration is what paints the first frame — before
-   * `/api/settings` has answered. The `14px` fallbacks left in the component and
-   * typography sheets are dsh originals and stay untouched: they only ever apply
-   * when no token is declared at all, which this block prevents.
+   * The value is dsh's own default, 14px, and it has to agree with
+   * `server/src/store.ts` (`FONT_SIZE_DEFAULT`): this declaration is what paints
+   * the first frame — before `/api/settings` has answered. The `14px` fallbacks
+   * left in the component and typography sheets are dsh originals and stay
+   * untouched: they only ever apply when no token is declared at all, which this
+   * block prevents.
    *
    * The derived sizes (--dsh-content-font-delta, -secondary, -delta-secondary)
    * are declared in gradient-shadow-text.css on `body`, where dsh puts them.
    * They are not repeated here. */
-  --dsh-content-font-size: 15px;
+  --dsh-content-font-size: 14px;
 
   /*
    * Notch and home-indicator insets, published once so every consumer reads a

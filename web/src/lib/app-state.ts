@@ -47,7 +47,7 @@ import { DEFAULT_PRESET_ID } from "./types.ts";
 const DEFAULT_SETTINGS: WebSettings = {
   appearance: "system",
   language: "system",
-  contentFontSize: 15,
+  contentFontSize: 14,
   transcriptDisplay: "standard",
   busySendBehavior: "queue",
   browserNotifications: false,

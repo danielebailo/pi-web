@@ -39,12 +39,13 @@ export function applyAppearance(preference: AppearancePreference): void {
 }
 
 /**
- * The conversation-content font size. Written as an inline property on
- * `documentElement` so it beats the `:root` fallback without a stylesheet rule
- * per value.
+ * The conversation-content font size. Written as an inline property on `body`,
+ * where dsh's bootstrap script and ThemePresenter write it and where
+ * `gradient-shadow-text.css` derives the delta/secondary pair from it. It beats
+ * the `:root` fallback without a stylesheet rule per value.
  */
 export function applyContentFontSize(px: number): void {
-  document.documentElement.style.setProperty("--dsh-content-font-size", `${px}px`);
+  document.body.style.setProperty("--dsh-content-font-size", `${px}px`);
 }
 
 /**

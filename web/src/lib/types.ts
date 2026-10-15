@@ -645,9 +645,9 @@ export type AgentSettings =
   | { available: false }
   | { available: true; autoCompaction: boolean };
 
-/** Bounds for the content font size, mirroring dsh's theme schema (12..17). */
-export const FONT_SIZE_MIN = 12;
-export const FONT_SIZE_MAX = 17;
+/** Bounds for the content font size, mirroring dsh's theme schema (10..22). */
+export const FONT_SIZE_MIN = 10;
+export const FONT_SIZE_MAX = 22;
 
 /**
  * A model entry inside a provider. pi only requires `id`.

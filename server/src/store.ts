@@ -92,16 +92,16 @@ const LANGUAGE_VALUES: readonly LanguagePreference[] = ["system", "zh-CN", "en"]
 const BUSY_SEND_VALUES: readonly BusySendBehavior[] = ["queue", "steer"];
 
 /**
- * Conversation content font size bounds, copied from dsh's theme schema
- * (`Schema.number().step(1).min(12).max(17).default(14)`). The range is dsh's;
- * the default is not: this project starts at 15 while upstream dsh starts at
- * 14. Out-of-range values
- * are rejected rather than clamped: silently showing a different number than
-the user typed is worse than refusing the write.
+ * Conversation content font size bounds, taken from dsh's theme schema
+ * (`Schema.number().step(1).min(10).max(22).default(14)` in
+ * `packages/client/ui-theme/src/theme-settings.ts`). Range and default are both
+ * dsh's; the setting scales conversation content only. Out-of-range values are
+ * rejected rather than clamped: silently showing a different number than the
+ * user typed is worse than refusing the write.
  */
-export const FONT_SIZE_MIN = 12;
-export const FONT_SIZE_MAX = 17;
-export const FONT_SIZE_DEFAULT = 15;
+export const FONT_SIZE_MIN = 10;
+export const FONT_SIZE_MAX = 22;
+export const FONT_SIZE_DEFAULT = 14;
 
 /**
  * The provider/model pair that writes automatic session titles.

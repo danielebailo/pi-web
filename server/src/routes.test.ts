@@ -1698,7 +1698,7 @@ describe("settings", () => {
     expect(res.body).toEqual({
       appearance: "system",
       language: "system",
-      contentFontSize: 15,
+      contentFontSize: 14,
       transcriptDisplay: "standard",
       busySendBehavior: "queue",
       browserNotifications: false,
@@ -1836,14 +1836,30 @@ describe("settings", () => {
   });
 
   it("rejects an out-of-range font size rather than clamping it", async () => {
-    for (const contentFontSize of [11, 18, 14.5, "15"]) {
+    for (const contentFontSize of [9, 23, 14.5, "15"]) {
       const res = await api("/api/settings", {
         method: "PUT",
         body: JSON.stringify({ contentFontSize }),
       });
       expect(res.status).toBe(400);
     }
-    expect((await api("/api/settings")).body.contentFontSize).toBe(15);
+    expect((await api("/api/settings")).body.contentFontSize).toBe(14);
+  });
+
+  it("accepts both ends of dsh's font size range", async () => {
+    // dsh's schema is `min(10).max(22).default(14)` (ui-theme's
+    // theme-settings.ts, the same pair its FontSizeRow disables the stepper
+    // against). The numbers are spelled out here rather than imported so a
+    // drift back to the narrower 12..17 range this project used to ship fails
+    // the test instead of following the constant.
+    for (const contentFontSize of [10, 22]) {
+      const res = await api("/api/settings", {
+        method: "PUT",
+        body: JSON.stringify({ contentFontSize }),
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.contentFontSize).toBe(contentFontSize);
+    }
   });
 
   it("rejects an unknown option for the enum fields", async () => {
