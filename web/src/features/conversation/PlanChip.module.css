@@ -1,0 +1,81 @@
+/*
+ * The plan-mode chip: dsh's `PlanModeControl.module.css` geometry and colours
+ * (the same 28px compact control as its siblings in the row), with this
+ * project's name for the brand pair — `--dsw-alias-state-business-*` is the
+ * blue the model picker's slider already uses, and it flips with the theme.
+ */
+
+.wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  min-width: 34px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-state-business-tertiary);
+  color: var(--dsw-alias-state-business-primary);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  cursor: pointer;
+}
+
+/* The compact form (a narrow frame): one glyph-sized control, the label dropped
+ * but the aria-label kept, so nothing about the state becomes unreadable. */
+.chip[data-compact="true"] {
+  padding: 0 6px;
+}
+
+.chip:hover:not(:disabled) {
+  background: color-mix(
+    in srgb,
+    var(--dsw-alias-state-business-tertiary),
+    var(--dsw-alias-state-business-primary) 6%
+  );
+}
+
+.chip:focus-visible {
+  outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 2px;
+}
+
+.chip:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* One 14px glyph slot ahead of the label: the plan at rest, the crossed-out
+ * circle while the enabled chip is hovered or keyboard-focused. */
+.glyph {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  color: currentColor;
+}
+
+.hoverGlyph,
+.chip:hover:not(:disabled) .restGlyph,
+.chip:focus-visible .restGlyph {
+  display: none;
+}
+
+.chip:hover:not(:disabled) .hoverGlyph,
+.chip:focus-visible .hoverGlyph {
+  display: block;
+}
+
+.error {
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  line-height: 18px;
+}

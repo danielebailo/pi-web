@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import clsx from "clsx";
 import { CloseIcon } from "../../components/icons.tsx";
 import { Glyph } from "../../components/dsh-icons.tsx";
 import { useT } from "../../lib/app-state.ts";
 import type { AskUserQuestionAnswerItem, AskUserQuestionItem } from "../../lib/types.ts";
 import { Markdown } from "./Markdown.tsx";
+import { AnswerField } from "./AnswerField.tsx";
 import { PlanReviewPanel } from "./PlanReviewPanel.tsx";
 import {
   askUserAnswerPayload,
@@ -83,6 +84,28 @@ export interface QuestionComposerProps {
   sessionLabel?: string;
   /** Jumps to that session; offered only alongside `sessionLabel`. */
   onOpenSession?: () => void;
+  /**
+   * Show this review's plan in the right sidebar, returning whether it landed.
+   *
+   * The card opens it without being asked (dsh's `PlanReviewOpen` does), and a
+   * `false` — no session to address yet — leaves the automatic open pending
+   * instead of spending it.
+   */
+  onOpenPlan?: ((plan: PlanReviewTarget) => boolean) | undefined;
+}
+
+/**
+ * A plan as the sidebar needs it: the document, the title it is filed under, and
+ * the tool call that submitted it when there is one.
+ */
+export interface PlanReviewTarget {
+  /** The `exit_plan_mode` call that submitted the plan; absent for a review
+   * that reached the card straight from an extension. */
+  callId?: string;
+  /** The dialog's own id, which is what names a call-less document in memory. */
+  requestId?: string;
+  title: string;
+  plan: string;
 }
 
 const EMPTY_DRAFT: AskUserDraft = { selected: [], custom: "", skipped: false };
@@ -98,6 +121,7 @@ export function QuestionComposer({
   draftKey,
   sessionLabel,
   onOpenSession,
+  onOpenPlan,
 }: QuestionComposerProps) {
   const t = useT();
   const timeout = typeof timeoutMs === "number" && timeoutMs > 0 ? timeoutMs : null;
@@ -142,6 +166,40 @@ export function QuestionComposer({
     ? current.intent
     : null;
 
+  /**
+   * The document this review judges, as the sidebar addresses it.
+   *
+   * `callId` is what makes it reopenable: the plan lives in the transcript's
+   * `exit_plan_mode` call and the tab finds it there by replaying one session.
+   * A review with no call — an extension asking directly — has only its own
+   * text, so the sidebar keeps that in memory under the request's own key, and
+   * a reload is what makes it expire (dsh's temporary `plan-review` resource).
+   */
+  const planTarget: PlanReviewTarget | null =
+    intent !== null && current?.detail !== undefined && current.detail.length > 0
+      ? {
+          ...(intent.callId === undefined ? {} : { callId: intent.callId }),
+          ...(requestId === undefined ? {} : { requestId }),
+          title: current.header ?? current.question,
+          plan: current.detail,
+        }
+      : null;
+
+  /**
+   * Open that document without being asked, once.
+   *
+   * A plan is read at a column's width, and the review is the moment it matters
+   * — dsh opens it from its own effect for the same reason. The ref is dsh's
+   * `markOpened` memory: a close is not undone by a re-render. It stays unset
+   * while the open did not land, so the first commit that can address a sidebar
+   * is the one that opens it.
+   */
+  const planOpened = useRef(false);
+  useEffect(() => {
+    if (planTarget === null || onOpenPlan === undefined || planOpened.current) return;
+    if (onOpenPlan(planTarget)) planOpened.current = true;
+  }, [planTarget, onOpenPlan]);
+
   const deliver = async (decision: AskUserDecision): Promise<void> => {
     setBusy("cancelled" in decision ? "cancel" : "answer");
     setError(null);
@@ -168,6 +226,8 @@ export function QuestionComposer({
   // browser moves it on its own — the same reason the single-question card
   // does, and the same escape hatch: a pointer or key press always wins.
   useEffect(() => {
+    // A plan review takes the card over entirely and owns its own keyboard.
+    if (intent !== null) return;
     const focusTarget = (): HTMLElement | null =>
       cardRef.current?.querySelector<HTMLElement>("[data-focus-first]") ?? null;
     focusTarget()?.focus();
@@ -243,6 +303,12 @@ export function QuestionComposer({
     if (busy !== null) return;
     const payload = askUserAnswerPayload(questions, drafts);
     if (payload === null) {
+      // A plan review's only text is the change request, so an empty field is
+      // that — not an unanswered question of a batch.
+      if (intent !== null) {
+        setError(t("question.planChangesEmpty"));
+        return;
+      }
       // A batch is all-or-nothing, so a refused submit sends the user to the
       // question that is missing rather than leaving them to hunt for it.
       const missing = firstUnanswered(questions, drafts);
@@ -288,6 +354,52 @@ export function QuestionComposer({
     event.preventDefault();
     pick(option.label);
   };
+
+  /**
+   * A submitted plan takes the card over instead of being drawn as a question.
+   *
+   * dsh's `QuestionComposer` does the same (`review === undefined ? QuestionFlow
+   * : PlanReviewPanel`), and the reason is the reason the ask chrome above
+   * exists at all: a pager, a skip and a submit are the parts of the card that
+   * make sense for a batch of questions. On a plan they are either meaningless
+   * or a second way to answer the same verdict — Skip sends the plan back as
+   * "keep planning", and Submit refuses outright with nothing selected.
+   */
+  if (intent !== null && current !== undefined) {
+    return (
+      <PlanReviewPanel
+        question={current}
+        intent={intent}
+        disabled={disabled}
+        requesting={planChanges}
+        error={error}
+        embedded={embedded}
+        cancellable={cancellable}
+        {...(sessionLabel === undefined ? {} : { sessionLabel })}
+        {...(onOpenSession === undefined ? {} : { onOpenSession })}
+        {...(planTarget === null || onOpenPlan === undefined
+          ? {}
+          : {
+              onOpenPlan: () => {
+                onOpenPlan(planTarget);
+              },
+            })}
+        changes={draft.custom}
+        onChange={(text) => updateDraft(index, (value) => ({ ...value, custom: text, skipped: false }))}
+        onApprove={() => {
+          // One verdict is the whole card, so it is sent on the spot rather than
+          // through a footer, because the verdict is what the button is.
+          void deliver({ answers: [{ id: current.id, selected: [intent.approve] }] });
+        }}
+        onRequestChanges={() => {
+          setPlanChanges((value) => !value);
+          setError(null);
+        }}
+        onSubmitChanges={submit}
+        onCancel={cancel}
+      />
+    );
+  }
 
   const title = total > 1
     ? t("question.batch", { count: total })
@@ -376,102 +488,63 @@ export function QuestionComposer({
                     </div>
                   ) : null}
 
-                  {intent !== null && current !== undefined ? (
-                    <>
-                      <PlanReviewPanel
-                        question={current}
-                        intent={intent}
-                        disabled={disabled}
-                        requesting={planChanges}
-                        onApprove={() => {
-                          // One question, so approving is the whole batch: sent
-                          // on the spot rather than through the footer, because
-                          // the verdict is what the button is.
-                          void deliver({
-                            answers: [{ id: current.id, selected: [intent.approve] }],
-                          });
-                        }}
-                        onRequestChanges={() => setPlanChanges(true)}
-                      />
-                      {planChanges ? (
-                        <AnswerField
-                          value={draft.custom}
-                          placeholder={t("question.planChangesPlaceholder")}
-                          disabled={disabled}
-                          onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
-                            const custom = event.target.value;
-                            updateDraft(index, (value) => ({ ...value, custom, skipped: false }));
-                          }}
-                          onKeyDown={(event) => {
-                            if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
-                            if (event.shiftKey) return;
-                            event.preventDefault();
-                            submit();
-                          }}
-                        />
-                      ) : null}
-                    </>
-                  ) : (
-                    <>
-                      {options.length > 0 ? (
-                        <div
-                          className={card.options}
-                          role={multiSelect ? "group" : "radiogroup"}
-                          aria-label={current.question}
-                        >
-                          {options.map((option, position) => {
-                            const { label, recommended } = parseRecommendedLabel(option.label);
-                            const selected = draft.selected.includes(option.label);
-                            return (
-                              <button
-                                type="button"
-                                key={option.label}
-                                data-focus-first={position === 0 ? "" : undefined}
-                                role={multiSelect ? "checkbox" : "radio"}
-                                aria-checked={selected}
-                                className={clsx(card.option, selected && card.optionSelected)}
-                                disabled={disabled}
-                                onClick={() => pick(option.label)}
-                              >
-                                {multiSelect ? (
-                                  <span className={clsx(styles.mark, selected && styles.markChecked)} aria-hidden>
-                                    {selected ? "✓" : ""}
-                                  </span>
-                                ) : (
-                                  <span className={card.number}>{position + 1}</span>
-                                )}
-                                <span className={card.optionCopy}>
-                                  <span className={card.optionLabel}>{label}</span>
-                                  {recommended ? <span className={card.badge}>{t("question.recommended")}</span> : null}
-                                  {option.description ? (
-                                    <span className={styles.optionDescription}>{option.description}</span>
-                                  ) : null}
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ) : null}
+                  {options.length > 0 ? (
+                    <div
+                      className={card.options}
+                      role={multiSelect ? "group" : "radiogroup"}
+                      aria-label={current.question}
+                    >
+                      {options.map((option, position) => {
+                        const { label, recommended } = parseRecommendedLabel(option.label);
+                        const selected = draft.selected.includes(option.label);
+                        return (
+                          <button
+                            type="button"
+                            key={option.label}
+                            data-focus-first={position === 0 ? "" : undefined}
+                            role={multiSelect ? "checkbox" : "radio"}
+                            aria-checked={selected}
+                            className={clsx(card.option, selected && card.optionSelected)}
+                            disabled={disabled}
+                            onClick={() => pick(option.label)}
+                          >
+                            {multiSelect ? (
+                              <span className={clsx(styles.mark, selected && styles.markChecked)} aria-hidden>
+                                {selected ? "✓" : ""}
+                              </span>
+                            ) : (
+                              <span className={card.number}>{position + 1}</span>
+                            )}
+                            <span className={card.optionCopy}>
+                              <span className={card.optionLabel}>{label}</span>
+                              {recommended ? <span className={card.badge}>{t("question.recommended")}</span> : null}
+                              {option.description ? (
+                                <span className={styles.optionDescription}>{option.description}</span>
+                              ) : null}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
 
-                      {options.length > 0 ? <div className={styles.otherLabel}>{t("question.other")}</div> : null}
-                      <AnswerField
-                        data-focus-first={options.length === 0 ? "" : undefined}
-                        value={draft.custom}
-                        placeholder={fieldPlaceholder}
-                        disabled={disabled}
-                        onChange={(event: ChangeEvent<HTMLTextAreaElement>) => {
-                          const custom = event.target.value;
-                          updateDraft(index, (value) => ({ ...value, custom, skipped: false }));
-                        }}
-                        onKeyDown={(event) => {
-                          if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
-                          if (event.shiftKey) return;
-                          event.preventDefault();
-                          advanceOrSubmit();
-                        }}
-                      />
-                    </>
-                  )}
+                  {options.length > 0 ? <div className={styles.otherLabel}>{t("question.other")}</div> : null}
+                  <AnswerField
+                    data-focus-first={options.length === 0 ? "" : undefined}
+                    value={draft.custom}
+                    placeholder={fieldPlaceholder}
+                    disabled={disabled}
+                    onChange={(event) => {
+                      const custom = event.target.value;
+                      updateDraft(index, (value) => ({ ...value, custom, skipped: false }));
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+                      if (event.shiftKey) return;
+                      event.preventDefault();
+                      advanceOrSubmit();
+                    }}
+                  />
                 </>
               )}
             </div>
@@ -513,44 +586,6 @@ export function QuestionComposer({
           </>
         ) : null}
       </section>
-    </div>
-  );
-}
-
-/**
- * The free-text answer field, mirror-grown so a long answer never scrolls its
- * own box empty. Same mechanism as the single-question card's field, without
- * the editor's multiline sizing — a batch answer is a line or two.
- */
-function AnswerField({
-  value,
-  placeholder,
-  disabled,
-  onChange,
-  onKeyDown,
-  ...rest
-}: {
-  value: string;
-  placeholder: string;
-  disabled: boolean;
-  onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void;
-  onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
-  "data-focus-first"?: string;
-}) {
-  return (
-    <div className={card.field}>
-      <div aria-hidden className={card.fieldMirror}>{`${value}\n`}</div>
-      <textarea
-        {...rest}
-        className={card.fieldInput}
-        value={value}
-        rows={1}
-        disabled={disabled}
-        spellCheck={false}
-        placeholder={placeholder}
-        onChange={onChange}
-        onKeyDown={onKeyDown}
-      />
     </div>
   );
 }

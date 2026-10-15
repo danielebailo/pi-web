@@ -6,13 +6,14 @@ const API_PORT = process.env.PI_WEB_SIMPLE_PORT ?? "4319";
 const API_TARGET = `http://127.0.0.1:${API_PORT}`;
 
 /**
- * 这个前端自身的版本，烘进产物里而不是运行时去问服务端。
+ * 这个前端自身的版本，烘进产物里作兜底。
  *
  * 版本号只有仓库根 `package.json` 一处来源——桌面壳的 `app/package.json`
  * 也是从同一份里抄的（见 desktop/scripts/prepare-app.mjs），所以三个发行
- * 形态（CLI、浏览器、桌面）报出来的是同一个数。它是构建期的常量，不是
- * 一件要问上游才知道的事，因此不走 `/api/updates`：那个接口带着网络检查
- * 和缓存，而这里只需要一个字符串。
+ * 形态（CLI、浏览器、桌面）报出来的是同一个数。「关于」里的项目版本行显示的
+ * 是服务端现读的那份（`/api/updates` 的 `app.current`），因为只有服务端那份
+ * 能拿去和 npm 上的版本比较、并在更新完之后重新读一次；这个常量只在那一次
+ * 读失败时顶上——同一份文件的两种读法，只在那一种情况下才会不一致。
  */
 const packageJson = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),

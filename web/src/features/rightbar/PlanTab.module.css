@@ -1,0 +1,33 @@
+/*
+ * The plan document, at a column's width: dsh's `PlanPreview.module.css`, with
+ * this project's alias tokens in place of its static neutrals (the aliases
+ * already flip with the appearance setting, so the dark override dsh needs for
+ * its two fills has nothing to say here — same trade as the changed-files card).
+ */
+
+.preview {
+  position: relative;
+  box-sizing: border-box;
+  height: 100%;
+  overflow: auto;
+  padding: 20px 24px 40px;
+}
+
+.document {
+  color: var(--dsw-alias-label-primary);
+  font-size: 14px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+
+.note {
+  padding: 24px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 14px;
+}
+
+@media (max-width: 767px) {
+  .preview {
+    padding: 16px 18px 32px;
+  }
+}

@@ -18,6 +18,7 @@ import { FLAT_ORDER_KEY } from "../../lib/sidebar-view.ts";
 import { useStore } from "../../lib/store.ts";
 import styles from "../../layout/Sidebar.module.css";
 import { SessionRow, sessionStatus } from "./ProjectTree.tsx";
+import { pendingAskOf, type PendingAsk } from "../conversation/question-model.ts";
 import { flatSessionRowsOf } from "./session-rows.ts";
 import type { SidebarDrag } from "./use-sidebar-drag.ts";
 
@@ -42,9 +43,9 @@ export function FlatSessionList({ drag }: { drag: SidebarDrag }) {
     }
     return map;
   }, [state.projects, state.sessions, state.unsavedSessions]);
-  /** True when this row's session is the one an extension is blocked on. */
-  const pendingFor = (path: string): boolean =>
-    state.pendingUiRequests.some((item) => item.sessionPath === path);
+  /** What an extension is blocked on in this row's session, or null. */
+  const pendingFor = (path: string): PendingAsk | null =>
+    pendingAskOf(state.pendingUiRequests, path);
 
   if (rows.drafts.length === 0 && rows.sessions.length === 0) {
     return <p className={styles.emptyList}>{t("session.empty")}</p>;
@@ -68,23 +69,26 @@ export function FlatSessionList({ drag }: { drag: SidebarDrag }) {
         />
       ))}
 
-      {rows.sessions.map((session) => (
-        <SessionRow
-          key={session.path}
-          sessionPath={session.path}
-          projectId={ownerOf.get(session.path)}
-          title={session.title}
-          time={formatRelativeTime(session.modified, t)}
-          active={session.path === selected}
-          external={Boolean(state.externalChanged[session.path])}
-          status={sessionStatus(
-            state.sessionActivity[session.path],
-            pendingFor(session.path),
-          )}
-          indent={0}
-          drag={drag.sessionRow(FLAT_ORDER_KEY, session.path)}
-        />
-      ))}
+      {rows.sessions.map((session) => {
+        const pending = pendingFor(session.path);
+        return (
+          <SessionRow
+            key={session.path}
+            sessionPath={session.path}
+            projectId={ownerOf.get(session.path)}
+            title={session.title}
+            // A plan review takes the timestamp's place, as dsh draws it.
+            time={pending === "plan-review"
+              ? t("session.planReviewTime")
+              : formatRelativeTime(session.modified, t)}
+            active={session.path === selected}
+            external={Boolean(state.externalChanged[session.path])}
+            status={sessionStatus(state.sessionActivity[session.path], pending)}
+            indent={0}
+            drag={drag.sessionRow(FLAT_ORDER_KEY, session.path)}
+          />
+        );
+      })}
     </>
   );
 }

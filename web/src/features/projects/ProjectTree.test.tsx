@@ -311,6 +311,50 @@ describe("ProjectTree session status mark", () => {
     expect(html).not.toContain('data-state="warning"');
     expect(html).not.toContain("等待回答");
   });
+
+  /** A question carrying dsh's plan-review tag, as `exit_plan_mode` asks it. */
+  const reviewing = (sessionPath: string): PendingUiRequest => ({
+    sessionPath,
+    request: {
+      type: "extension_ui_request",
+      id: `plan-${sessionPath}`,
+      method: "ask_user",
+      questions: [
+        {
+          id: "plan-review",
+          question: "Approve this plan and leave plan mode?",
+          header: "迁移计划",
+          detail: "# 迁移计划\n\n1. 做一件事。",
+          options: [{ label: "Approve" }, { label: "Request changes" }],
+          intent: { kind: "plan-review", approve: "Approve", callId: "call-1" },
+        },
+      ],
+    },
+  });
+
+  it("names a plan review as its own state, and gives it the timestamp's place", () => {
+    const html = renderWith({}, [reviewing(PATH)]);
+
+    expect(html).toContain('data-state="warning"');
+    // dsh's two lines: the mark is announced as "Plan awaiting review" while the
+    // row itself reads "Plan review" where its timestamp would be.
+    expect(html).toContain("计划待审批");
+    expect(html).toContain("计划审批");
+    expect(html).not.toContain("等待回答");
+  });
+
+  it("treats a tag on one question of a batch as an ordinary question", () => {
+    // One verdict cannot stand for several questions — the card presents such a
+    // batch as a list, and the row must describe what the card will show.
+    const batch = reviewing(PATH);
+    const questions = batch.request.questions ?? [];
+    const html = renderWith({}, [
+      { ...batch, request: { ...batch.request, questions: [...questions, { id: "two", question: "And?" }] } },
+    ]);
+
+    expect(html).toContain("等待回答");
+    expect(html).not.toContain("计划待审批");
+  });
 });
 
 /**

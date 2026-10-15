@@ -236,6 +236,8 @@ body {
   --dsw-alias-scrollbar-hover-l2: var(--dsw-static-neutral-300);
   --dsw-alias-state-business-primary: var(--dsw-static-deepseek-500);
   --dsw-alias-state-business-tertiary: var(--dsw-static-deepseek-100);
+  --dsw-alias-code-diff-added: color-mix(in srgb, var(--dsw-static-green-500) 8%, transparent);
+  --dsw-alias-code-diff-deleted: color-mix(in srgb, var(--dsw-static-red-600) 8%, transparent);
   --dsw-alias-state-error-primary: var(--dsw-static-red-600);
   --dsw-alias-state-error-secondary: var(--dsw-static-red-400);
   --dsw-alias-state-success-primary: var(--dsw-static-green-500);
@@ -334,6 +336,8 @@ html[data-appearance="dark"] body {
   --dsw-alias-scrollbar-hover-l2: var(--dsw-static-neutral-550);
   --dsw-alias-state-business-primary: var(--dsw-static-deepseek-400);
   --dsw-alias-state-business-tertiary: var(--dsw-static-deepseek-800);
+  --dsw-alias-code-diff-added: color-mix(in srgb, var(--dsw-static-green-500) 12%, transparent);
+  --dsw-alias-code-diff-deleted: color-mix(in srgb, var(--dsw-static-red-400) 12%, transparent);
   --dsw-alias-state-error-primary: var(--dsw-static-red-400);
   --dsw-alias-state-error-secondary: var(--dsw-static-red-400);
   --dsw-alias-state-success-primary: var(--dsw-static-green-500);

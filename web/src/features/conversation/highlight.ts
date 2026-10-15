@@ -347,6 +347,16 @@ export interface HighlightCarry {
 export interface HighlightStep {
   html: string;
   /**
+   * The same content as `html`, one entry per source line — each a complete
+   * `<span class="line">` element.
+   *
+   * The block renderer wants the wrapped markup; a view that addresses lines
+   * (`CodeView`) needs them apart, because a line is only scrollable to when it
+   * is an element of its own. Carried here rather than re-derived from `html`
+   * by splitting on newlines: the tokenizer already had them in this shape.
+   */
+  lines: string[];
+  /**
    * The state to pass back for the next chunk, or `null` when this call was
    * answered from cache and nothing was tokenized.
    */
@@ -496,10 +506,14 @@ export function highlightStep(
       ...options,
       grammarState: state ?? undefined,
     });
-    const html = wrapHtml([...lines, ...renderLines(tailTokens)]);
+    const rendered = [...lines, ...renderLines(tailTokens)];
     // No state means the next chunk has to start over; the colours are still
     // right, only the next call is expensive again.
-    return { html, carry: state === null ? null : { lang: resolved, head, state, lines } };
+    return {
+      html: wrapHtml(rendered),
+      lines: rendered,
+      carry: state === null ? null : { lang: resolved, head, state, lines },
+    };
   }
 
   let base = continued;
@@ -521,8 +535,8 @@ export function highlightStep(
     ...options,
     grammarState: base.state,
   });
-  const html = wrapHtml([...base.lines, ...renderLines(tailTokens)]);
-  return { html, carry: base };
+  const rendered = [...base.lines, ...renderLines(tailTokens)];
+  return { html: wrapHtml(rendered), lines: rendered, carry: base };
 }
 
 /**
@@ -533,6 +547,43 @@ export function highlightStep(
  */
 export function highlight(code: string, lang?: string): string | null {
   return highlightStep(null, code, lang)?.html ?? null;
+}
+
+/** The wrapper `renderLines` puts around each line, unwrapped by `highlightLines`. */
+const LINE_OPEN = '<span class="line">';
+const LINE_CLOSE = "</span>";
+
+/**
+ * One line of highlighted code, per source line — each ready to sit inside an
+ * element of the caller's own.
+ *
+ * The counterpart to `highlight` for a view that addresses lines: it returns the
+ * *contents* of each rendered line rather than a wrapped document, so the caller
+ * can keep one element per line (which is what makes a line scrollable to) and
+ * still show coloured tokens inside it.
+ *
+ * `null` under exactly the same conditions as `highlight` — no grammar, a
+ * grammar still arriving, or a file past `MAX_HIGHLIGHT_LENGTH` — and the caller
+ * is expected to fall back to plain text rather than to wait: colour is an
+ * upgrade over the text it already has.
+ *
+ * @param code - The source, without a trailing newline (one would render as an
+ * empty last line, since the tokenizer splits on the last one).
+ * @param lang - The language as the file named it; aliases resolve through the
+ * same table as a fence.
+ * @returns One HTML fragment per line, in order.
+ */
+export function highlightLines(code: string, lang?: string): string[] | null {
+  const step = highlightStep(null, code, lang);
+  if (step === null) return null;
+  return step.lines.map(unwrapLine);
+}
+
+/** Strip the per-line wrapper `renderLines` adds, leaving the tokens inside. */
+function unwrapLine(line: string): string {
+  return line.startsWith(LINE_OPEN) && line.endsWith(LINE_CLOSE)
+    ? line.slice(LINE_OPEN.length, -LINE_CLOSE.length)
+    : line;
 }
 
 // Deferred like dsh's `setTimeout(() => getHighlighter(), 0)`: construction

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extensionOf, languageFor, previewKindFor } from "./file-kind.ts";
+import { extensionOf, isImageName, languageFor, previewKindFor } from "./file-kind.ts";
 
 describe("extensionOf", () => {
   it("lowercases the extension and ignores the dot", () => {
@@ -59,5 +59,19 @@ describe("previewKindFor", () => {
     expect(previewKindFor("README.md", "text")).toBe("markdown");
     expect(previewKindFor("index.ts", "text")).toBe("code");
     expect(previewKindFor("notes.txt", "text")).toBe("text");
+  });
+});
+
+describe("isImageName", () => {
+  it("recognizes the extensions the raw route streams as pictures", () => {
+    expect(isImageName("logo.png")).toBe(true);
+    expect(isImageName("a/b/photo.JPEG")).toBe(true);
+    expect(isImageName("icon.svg")).toBe(true);
+  });
+
+  it("leaves everything else to the text renderers", () => {
+    expect(isImageName("notes.md")).toBe(false);
+    expect(isImageName("Makefile")).toBe(false);
+    expect(isImageName("photo.png.bak")).toBe(false);
   });
 });

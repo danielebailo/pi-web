@@ -129,11 +129,17 @@ export const api = {
    * A page rather than the whole file because the whole-file read has no good
    * answer for a large one: it ends mid-line and says so, leaving the reader at
    * the head of a log they cannot get past.
+   *
+   * `fromLine` is the way in when the reader wants one specific line instead of
+   * the head — a reference in a message. The server scans to it once and answers
+   * with the page around it, so a jump into a long file costs one request rather
+   * than a walk.
    */
-  readWorkspaceTextPage: (projectId: string, path: string, offset: number) =>
+  readWorkspaceTextPage: (projectId: string, path: string, offset: number, fromLine?: number) =>
     request<WorkspaceTextPage>(
       `/api/projects/${encodeURIComponent(projectId)}/text?path=${encodeURIComponent(path)}` +
-        `&offset=${String(offset)}`,
+        `&offset=${String(offset)}` +
+        (fromLine === undefined ? "" : `&fromLine=${String(fromLine)}`),
     ),
 
   /**
@@ -255,6 +261,19 @@ export const api = {
       `/api/sessions/${sessionId(sessionPath)}/command`,
       { method: "POST", body: JSON.stringify({ name, args }) },
     ),
+
+  /** Switch plan mode. The reply carries the state the session file now holds,
+   * which is the only authoritative answer — the switch itself is an extension
+   * command running inside pi. */
+  setSessionPlan: (sessionPath: string, active: boolean) =>
+    request<{ ok: boolean; planMode: boolean }>(
+      `/api/sessions/${sessionId(sessionPath)}/plan`,
+      { method: "POST", body: JSON.stringify({ active }) },
+    ),
+
+  /** Plan mode as the running session holds it, which is ahead of the file. */
+  getSessionPlan: (sessionPath: string) =>
+    request<{ planMode: boolean }>(`/api/sessions/${sessionId(sessionPath)}/plan`),
 
   addProject: (path: string, title?: string) =>
     request<ProjectView>("/api/projects", {
@@ -464,6 +483,19 @@ export const api = {
     }),
 
   /**
+   * Move this deployment itself to the version npm calls latest.
+   *
+   * Slower still than a package update — npm resolves and downloads the whole
+   * CLI — and the answer means "new files on disk", not "new program in
+   * memory": the caller has to say that a restart is what finishes the job.
+   */
+  updateApp: (input: { projectPath: string | null }) =>
+    request<UpdatesView>("/api/updates/app", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  /**
    * MCP servers, read from pi's own `mcp.json` files — a running session only
    * knows what it already connected to, so the page asks what the next start
    * would connect to.
@@ -601,6 +633,29 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ message, ...imageField(images) }),
     }),
+
+  /**
+   * Edit or remove one queued message.
+   *
+   * `index` positions the item within its mode lane and `expectedText` proves
+   * the caller's view is current; the server restores the queue untouched and
+   * answers 409 when the item has moved (usually because pi started sending
+   * it). Editing carries text only — pi's queue holds strings, so the server
+   * drops the images of a rewritten row the way dsh's editor does.
+   */
+  queueUpdate: (
+    sessionPath: string,
+    body: {
+      mode: "steer" | "followUp";
+      index: number;
+      expectedText: string;
+      action: { kind: "remove" } | { kind: "edit"; text: string };
+    },
+  ) =>
+    request<{ ok: true; failed: string[] }>(
+      `/api/sessions/${sessionId(sessionPath)}/queue/update`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
 
   abort: (sessionPath: string) =>
     request<{ ok: true }>(`/api/sessions/${sessionId(sessionPath)}/abort`, { method: "POST" }),

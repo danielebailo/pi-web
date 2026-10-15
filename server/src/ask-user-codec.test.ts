@@ -71,7 +71,7 @@ describe("decodeAskUserBatch", () => {
       question: "Approve this plan?",
       detail: "# Plan\n\ndo the thing",
       options: [{ label: "Approve" }, { label: "Request changes" }],
-      intent: { kind: "plan-review", approve: "Approve", extra: "ignored" },
+      intent: { kind: "plan-review", approve: "Approve", callId: "call-1", extra: "ignored" },
     };
     expect(decodeAskUserBatch(title({ v: 1, kind: "ask_user", questions: [plan] }))?.questions).toEqual([
       {
@@ -79,9 +79,18 @@ describe("decodeAskUserBatch", () => {
         question: "Approve this plan?",
         detail: "# Plan\n\ndo the thing",
         options: [{ label: "Approve" }, { label: "Request changes" }],
-        intent: { kind: "plan-review", approve: "Approve" },
+        // `callId` is the tool invocation that submitted the plan, which is how
+        // the client reopens the logged document after the review closes.
+        intent: { kind: "plan-review", approve: "Approve", callId: "call-1" },
       },
     ]);
+
+    // A pointer of the wrong shape costs the pointer, not the tag: the verdict
+    // itself is still answerable, and the card just cannot offer the document.
+    const badCallId = { ...plan, intent: { kind: "plan-review", approve: "Approve", callId: 7 } };
+    expect(
+      decodeAskUserBatch(title({ v: 1, kind: "ask_user", questions: [badCallId] }))?.questions[0]?.intent,
+    ).toEqual({ kind: "plan-review", approve: "Approve" });
 
     // A tag this build does not know is a decoration, not a reason to refuse an
     // otherwise answerable batch: the card falls back to the generic list.

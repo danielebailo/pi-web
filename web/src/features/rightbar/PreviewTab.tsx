@@ -5,6 +5,7 @@ import { api } from "../../lib/api.ts";
 import type { WorkspaceFileContent, WorkspaceTextPage } from "../../lib/types.ts";
 import { Markdown } from "../conversation/Markdown.tsx";
 import { CodeBlock } from "../conversation/CodeBlock.tsx";
+import { CodeView } from "./CodeView.tsx";
 import { languageFor, previewKindFor } from "./file-kind.ts";
 import { buildFrameDocument } from "./html-frame.ts";
 import { PathLabel } from "./rightbar-path.tsx";
@@ -176,7 +177,16 @@ export function PreviewTab({
         ) : state.status === "failed" ? (
           <div className={pane.error}>{state.error}</div>
         ) : (
-          <Body projectId={projectId} path={tab.target} attempt={attempt} file={state.file} />
+          <Body
+            projectId={projectId}
+            path={tab.target}
+            attempt={attempt}
+            file={state.file}
+            // A reference's lines belong to the tab, so they are read back on
+            // every render: a second chip pointing at the same file moves the
+            // tab it already has rather than opening a neighbouring copy.
+            {...(tab.line === undefined ? {} : { position: { line: tab.line, endLine: tab.endLine } })}
+          />
         )}
       </div>
     </div>
@@ -194,11 +204,14 @@ function Body({
   path,
   attempt,
   file,
+  position,
 }: {
   projectId: string;
   path: string;
   attempt: number;
   file: WorkspaceFileContent;
+  /** Lines a reference asked for; absent for an ordinary open. */
+  position?: { line?: number | undefined; endLine?: number | undefined } | undefined;
 }) {
   const t = useT();
   const kind = previewKindFor(file.name, file.kind);
@@ -274,7 +287,7 @@ function Body({
    * instead, so nothing is announced as missing that the reader cannot reach.
    */
   if (file.truncated) {
-    return <TextPager projectId={projectId} path={path} resetKey={attempt} />;
+    return <TextPager projectId={projectId} path={path} resetKey={attempt} focusLine={position?.line} />;
   }
 
   if (kind === "markdown") {
@@ -288,7 +301,19 @@ function Body({
   if (kind === "code") {
     return (
       <div className={styles.code}>
-        <CodeBlock code={file.content} lang={languageFor(file.name)} />
+        {position?.line === undefined ? (
+          <CodeBlock code={file.content} lang={languageFor(file.name)} />
+        ) : (
+          /* A read that asked for a line gets the row view, and one that did not
+           * keeps the highlighted block it always had: colour is worth more
+           * than a scroll target in a file nobody pointed into. */
+          <CodeView
+            code={file.content}
+            lang={languageFor(file.name)}
+            focusLine={position.line}
+            focusEndLine={position.endLine}
+          />
+        )}
       </div>
     );
   }
@@ -302,6 +327,16 @@ function appendPage(held: WorkspaceTextPage[], page: WorkspaceTextPage): Workspa
 }
 
 /**
+ * How many pages the fallback may pull in while chasing its line.
+ *
+ * Twenty pages is 40k lines — far past the point where the reader is reading
+ * source rather than scrolling a log, and a hard stop that keeps a stale line
+ * number from walking the whole file a page at a time. Only the fallback path
+ * ever reaches it; a line-addressed read lands in one request.
+ */
+const MAX_CHASE_PAGES = 20;
+
+/**
  * A file too large to hand over whole, read a page at a time.
  *
  * The first page arrives on its own, and each page after it only when the reader
@@ -310,36 +345,48 @@ function appendPage(held: WorkspaceTextPage[], page: WorkspaceTextPage): Workspa
  * previous page ended at — because a line number cannot be resolved without
  * re-reading everything before it.
  *
+ * A reference is the one case that *does* need a line, so it is the one case the
+ * server resolves it: the first request carries `fromLine`, the server scans to
+ * it and answers with the page around it, and `startLine` numbers that page so
+ * the rest of the walk can continue from it. Without that, a jump would have to
+ * be approximated by reading pages until one covered the target.
+ *
  * Pages are drawn as plain text rather than through the code renderer, even for
  * source files: the seam between two pages has to stay invisible, and a
  * highlighted block per page would put a language banner and a copy button in
  * the middle of a file that has no seam in it. The divider above each page is
- * what keeps the location readable instead.
+ * what keeps the location readable instead — and a page that has been jumped to
+ * is drawn as rows, because a line number only means something on a line that is
+ * an element of its own.
  */
 function TextPager({
   projectId,
   path,
   resetKey,
+  focusLine,
 }: {
   projectId: string;
   path: string;
   resetKey: number;
+  /** A reference's line, which the pager reads toward; see the chase effect. */
+  focusLine?: number | undefined;
 }) {
   const t = useT();
   const [pages, setPages] = useState<WorkspaceTextPage[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // `resetKey` is the header's reload: it re-reads the file from its first page
+  // `resetKey` is the header's reload: it re-reads the file from the first page
   // rather than leaving the reader where they were in a file that may have
-  // changed under them.
+  // changed under them. A reference's line is re-asked here too — the server
+  // scans to it, so landing on a line deep in the file is one request.
   useEffect(() => {
     let cancelled = false;
     setPages([]);
     setError(null);
     setBusy(true);
     api
-      .readWorkspaceTextPage(projectId, path, 0)
+      .readWorkspaceTextPage(projectId, path, 0, focusLine)
       .then((page) => {
         if (!cancelled) setPages((held) => appendPage(held, page));
       })
@@ -352,17 +399,53 @@ function TextPager({
     return () => {
       cancelled = true;
     };
-  }, [projectId, path, resetKey]);
+  }, [projectId, path, resetKey, focusLine]);
 
   const last = pages[pages.length - 1];
   const done = last !== undefined && last.eof;
   const nextOffset = last?.nextOffset ?? 0;
   const lines = pages.reduce((sum, page) => sum + page.lines, 0);
 
+  /**
+   * Chase the reference's line — the fallback path.
+   *
+   * A line-addressed read is answered by the server in one request, so this loop
+   * only runs when that did not cover the target: an older server that ignored
+   * `fromLine`, or a line past the end of the file where the last page is not
+   * enough. It is bounded because a stale reference must not walk a gigabyte of
+   * log one page at a time — at that point the honest answer is "the file is
+   * longer than this panel will read", which the pager already says.
+   */
+  useEffect(() => {
+    if (focusLine === undefined || busy || done) return;
+    if (pages.length === 0 || pages.length >= MAX_CHASE_PAGES) return;
+    // Compare against the line the loaded pages actually reach, not the number
+    // of lines read: a page-addressed read starts partway into the file.
+    if ((pages[0]?.startLine ?? 1) - 1 + lines >= focusLine) return;
+    let cancelled = false;
+    setBusy(true);
+    api
+      .readWorkspaceTextPage(projectId, path, nextOffset)
+      .then((page) => {
+        if (!cancelled) setPages((held) => appendPage(held, page));
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError((err as Error).message);
+      })
+      .finally(() => {
+        if (!cancelled) setBusy(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [focusLine, busy, done, pages.length, lines, nextOffset, projectId, path]);
+
   // Line ranges are accumulated at render time rather than stored, because each
   // page only knows how many lines it holds — the count is what the server
-  // answers with, and it is what keeps a page's own text free of padding.
-  let line = 1;
+  // answers with, and it is what keeps a page's own text free of padding. The
+  // starting number comes from the page itself when the read was addressed by
+  // line, and from 1 otherwise.
+  let line = pages[0]?.startLine ?? 1;
   const blocks = pages.map((page) => {
     const start = line;
     line += page.lines;
@@ -389,7 +472,22 @@ function TextPager({
               {t("preview.pageRange", { from: start, to: end })}
             </div>
           ) : null}
-          <pre className={styles.text}>{page.text}</pre>
+          {/* An ordinary open keeps the wrapping plain-text page it always had.
+              A reference's open switches the whole file to rows, because a line
+              number only means something on a line that does not wrap. */}
+          {focusLine === undefined ? (
+            <pre className={styles.text}>{page.text}</pre>
+          ) : (
+            <CodeView
+              code={page.text}
+              gutter={false}
+              firstLine={start}
+              // Only the page that holds the target gets a target; the others
+              // are context, and scrolling to a line they do not have is a
+              // no-op `CodeView` already guards against.
+              {...(focusLine >= start && focusLine <= end ? { focusLine } : {})}
+            />
+          )}
         </div>
       ))}
       {error !== null ? <div className={pane.error}>{error}</div> : null}

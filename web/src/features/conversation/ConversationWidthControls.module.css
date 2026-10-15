@@ -1,0 +1,66 @@
+/*
+ * The width drag strips flanking the transcript, ported from dsh's
+ * ConversationRoot widthHandle rules. They hang as direct children of the
+ * session pane — in the gutters beside the centered reading column, spanning
+ * everything below the pane header down through the composer band.
+ */
+
+.widthHandle {
+  position: absolute;
+  /* The session header's min-height; the strips start below it. */
+  top: 48px;
+  bottom: 0;
+  z-index: 0;
+  width: min(10px, calc((100% - var(--conversation-content-width, 780px)) / 2 - 24px - 24px));
+  cursor: col-resize;
+}
+
+.widthHandle[data-side="left"] {
+  right: calc(50% + var(--conversation-content-width, 780px) / 2 + 24px);
+}
+
+.widthHandle[data-side="right"] {
+  left: calc(50% + var(--conversation-content-width, 780px) / 2 + 24px);
+}
+
+/*
+ * The glow: a short 2px bar following the captured pointer's Y, centered in
+ * the strip — a 16px solid core over a ±36px fade, published during drag as
+ * --conversation-width-handle-pointer-y. Hover leaves its position unchanged.
+ */
+.widthHandle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to bottom,
+    transparent calc(var(--conversation-width-handle-pointer-y, 50%) - 36px),
+    var(--dsw-alias-scrollbar-bg-l1) calc(var(--conversation-width-handle-pointer-y, 50%) - 8px),
+    var(--dsw-alias-scrollbar-bg-l1) calc(var(--conversation-width-handle-pointer-y, 50%) + 8px),
+    transparent calc(var(--conversation-width-handle-pointer-y, 50%) + 36px)
+  );
+  opacity: 0;
+  pointer-events: none;
+}
+
+.widthHandle[data-side="left"]::after {
+  right: 4px;
+}
+
+.widthHandle[data-side="right"]::after {
+  left: 4px;
+}
+
+.widthHandle:hover::after,
+.widthHandle[data-dragging]::after {
+  opacity: 1;
+}
+
+/* A drag may cross the composer band; lifting the active handle keeps its
+   indicator visible without making the resting footer gutter draggable. */
+.widthHandle[data-dragging] {
+  z-index: 8;
+}

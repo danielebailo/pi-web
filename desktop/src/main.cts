@@ -215,6 +215,10 @@ async function startServer(paths: AppPaths): Promise<ServerHandle> {
     // Electron owns the window; opening a browser as well would be a bug.
     PI_WEB_SIMPLE_OPEN: "0",
     PI_WEB_SIMPLE_STATIC_DIR: paths.staticDir,
+    // Tells the server its copy lives in this bundle, not in an npm
+    // `node_modules`: the 关于 row then points at the release page instead of
+    // offering an `npm install -g` that would update something else entirely.
+    PI_WEB_SIMPLE_DESKTOP: "1",
   };
   if (paths.nodeBinDir !== null) {
     const pathKey = Object.keys(env).find((key) => key.toUpperCase() === "PATH") ?? "PATH";

@@ -77,7 +77,9 @@
 }
 
 .column {
-  max-width: 780px;
+  /* The pane's shared width axis — the user's dragged preference or the
+     adaptive default, published by ConversationWidthControls. */
+  max-width: var(--conversation-content-width, 780px);
   margin: 0 auto;
   padding: 20px 24px 8px;
   display: flex;

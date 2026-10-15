@@ -12,6 +12,7 @@ import { DraftMirror } from "./DraftMirror.tsx";
 import { useImageDraft } from "./useImageDraft.ts";
 import { useReferenceDraft } from "./useReferenceDraft.ts";
 import { ContextMeter } from "./ContextMeter.tsx";
+import { PlanChip } from "./PlanChip.tsx";
 import { ModelThinkingPicker } from "./ModelThinkingPicker.tsx";
 import { SlashMenu } from "./SlashMenu.tsx";
 import { FileMenu } from "./FileMenu.tsx";
@@ -54,6 +55,14 @@ export interface ComposerProps {
   busySendBehavior?: BusySendBehavior;
   /** Model and context controls; omitted when no session can be asked. */
   session?: ComposerSession;
+  /**
+   * Plan mode, as the session's own log records it, and the way out of it.
+   *
+   * The chip is drawn only while the mode is on (dsh's rule: entering is
+   * `/plan`, the chip is a way out), so an inactive session passes `active:
+   * false` and the row looks exactly as it did before.
+   */
+  plan?: { active: boolean; onExit: () => Promise<void> } | undefined;
   /** `images` are the pictures going with the message; empty for a text-only turn. */
   onSend(text: string, mode: "prompt" | "steer" | "followUp", images: ImageBlock[]): Promise<boolean>;
   onAbort(): void;
@@ -102,6 +111,7 @@ export function Composer({
   commands = [],
   busySendBehavior = "queue",
   session,
+  plan,
   onSend,
   onAbort,
   workspacePath,
@@ -318,6 +328,11 @@ export function Composer({
             inputRef={draft.fileInputRef}
             onFiles={(files) => void draft.attach(files)}
           />
+
+          {/* dsh's plan chip sits in this same control row, next to the model
+              trigger; this row has the attach button on its left, which is
+              where a mode that describes the *message* belongs. */}
+          {plan?.active === true ? <PlanChip compact={narrow} onExit={plan.onExit} /> : null}
 
           <span className={styles.spacer} />
 

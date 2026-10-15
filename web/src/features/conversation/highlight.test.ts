@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   getGrammarVersion,
   highlight,
+  highlightLines,
   highlightStep,
   lookupHighlight,
   rememberHighlight,
@@ -168,5 +169,44 @@ describe("incremental highlighting", () => {
     // and a fence with no known grammar is never stored.
     expect(lookupHighlight("const a = 1;", "json")).toBeUndefined();
     expect(lookupHighlight("const a = 1;")).toBeUndefined();
+  });
+});
+
+describe("highlightLines", () => {
+  it("returns one fragment per source line, with the wrapper already removed", () => {
+    const lines = highlightLines("const a = 1;\nconst b = 2;", "typescript");
+    expect(lines).toHaveLength(2);
+    expect(lines?.[0]).toContain("var(--shiki-token-");
+    // The `<span class="line">` wrapper belongs to the block renderer; a
+    // line-addressed view puts each fragment inside its own element.
+    expect(lines?.[0]).not.toContain('class="line"');
+  });
+
+  it("counts an empty line as a line", () => {
+    const lines = highlightLines("const a = 1;\n\nconst b = 2;", "typescript");
+    expect(lines).toHaveLength(3);
+    expect(lines?.[1]).toBe("");
+  });
+
+  it("resolves aliases through the same table as a fence", () => {
+    const code = "const a = 1;";
+    expect(highlightLines(code, "ts")).toEqual(highlightLines(code, "typescript"));
+    expect(highlightLines(code, "TS")).toEqual(highlightLines(code, "typescript"));
+  });
+
+  it("returns null under exactly the conditions `highlight` does", () => {
+    expect(highlightLines("const a = 1;")).toBeNull();
+    expect(highlightLines("--- a/x", "diff")).toBeNull();
+    expect(highlightLines("a".repeat(20_001), "json")).toBeNull();
+  });
+
+  it("escapes markup in the source rather than passing it through", () => {
+    const line = highlightLines("const a = 1 < 2 && 3 > 4;", "typescript")?.[0] ?? "";
+    expect(line).toContain("&lt;");
+    expect(line).toContain("&amp;&amp;");
+    expect(line).toContain("&gt;");
+    // Every tag left is one of the tokenizer's own spans; nothing from the
+    // source became markup.
+    expect(line.replace(/<\/?span[^>]*>/g, "")).not.toContain("<");
   });
 });

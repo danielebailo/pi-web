@@ -105,6 +105,14 @@ export interface PendingPrompt {
   mode: "prompt" | "steer" | "followUp";
   /** Pictures pasted while the draft was open. They are part of the message. */
   images?: ImageBlock[];
+  /**
+   * Whether pi will consume this as an extension command.
+   *
+   * It is carried across the queue because it decides whether the transcript
+   * gets an optimistic user turn: pi records only the message a command submits
+   * itself, so drawing the typed line would leave a row nothing ever wrote.
+   */
+  command?: boolean;
 }
 
 export interface AppState {
@@ -693,6 +701,21 @@ export const actions = {
     }));
   },
 
+  /**
+   * Update this deployment itself.
+   *
+   * Rethrows like `updateExtension`, and for the same reason: the row that
+   * started it has to stay put and show progress, the reason for a failure, and
+   * the restart the new files need before they are what is running.
+   */
+  async updateApp(projectPath: string | null): Promise<void> {
+    const updates = await api.updateApp({ projectPath });
+    appStore.update((state) => ({
+      ...state,
+      updates: { ...state.updates, [projectPath ?? ""]: updates },
+    }));
+  },
+
   // --- MCP -------------------------------------------------------------
 
   /** Load the MCP inventory for a workspace (null = user scope only). */
@@ -1096,6 +1119,7 @@ export const actions = {
     model: { provider: string; id: string } | null = null,
     thinkingLevel: string | null = null,
     presetId: string | null = null,
+    command = false,
   ): void {
     const localId = `${DRAFT_PREFIX}${Math.random().toString(36).slice(2, 10)}`;
     appStore.update((state) => ({
@@ -1132,7 +1156,7 @@ export const actions = {
         // rule the composer's own submit uses.
         const prompt = initialPrompt?.trim() ?? "";
         if (prompt.length > 0 || images.length > 0) {
-          actions.queuePendingPrompt(created.sessionPath, prompt, "prompt", images);
+          actions.queuePendingPrompt(created.sessionPath, prompt, "prompt", images, command);
         }
         // The draft id is replaced by the real path in place, wherever the user
         // has navigated to by now — the row follows the session, not the view.
@@ -1169,16 +1193,18 @@ export const actions = {
     text: string,
     mode: PendingPrompt["mode"],
     images: ImageBlock[] = [],
+    command = false,
   ): void {
     appStore.update((state) => ({
       ...state,
-      // `images` is present only when there are any: a text-only handoff stays
-      // the same three-field object it has always been.
+      // `images` and `command` are present only when they mean something: a
+      // text-only handoff stays the same three-field object it has always been.
       pendingPrompt: {
         sessionPath,
         text,
         mode,
         ...(images.length > 0 ? { images } : {}),
+        ...(command ? { command: true } : {}),
       },
     }));
   },

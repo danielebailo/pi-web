@@ -1,4 +1,5 @@
 import { Fragment, startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type {
   AgentMessage,
   AssistantMessage,
@@ -17,18 +18,23 @@ import type {
 import { ImageThumb } from "../../components/ImageLightbox.tsx";
 import { imageBlocksOf } from "../../lib/image-attachments.ts";
 import { Markdown } from "./Markdown.tsx";
+import { FileRefProvider, type FileRefDelegate } from "./file-ref-context.tsx";
+import { parsePathToken } from "./file-ref.ts";
 import { MessageActions } from "./MessageActions.tsx";
 import { ThinkingBlock } from "./ThinkingBlock.tsx";
 import { TodoRow } from "./TodoRow.tsx";
+import { TodoBaselinesProvider } from "./todo-history.tsx";
 import { ToolCallRow } from "./ToolCallRow.tsx";
 import { QuestionRow } from "./QuestionRow.tsx";
 import { TurnProcessGroup } from "./TurnProcessGroup.tsx";
 import { ChangedFilesCard } from "./ChangedFilesCard.tsx";
 import { turnFiles, type TurnFile } from "./turn-files.ts";
+import { resolveTurnRef, turnRefPaths, type TurnRefPath } from "./turn-refs.ts";
 import { turnChangesList, type TurnChanges } from "../rightbar/turn-changes-store.ts";
 import { RetryNotice } from "./RetryNotice.tsx";
 import { CompactionRow, CompactionRunning } from "./CompactionRow.tsx";
 import { TurnFailure } from "./TurnFailure.tsx";
+import { TurnTruncated } from "./TurnTruncated.tsx";
 import { TurnStatus } from "./TurnStatus.tsx";
 import { TurnNavigator } from "./TurnNavigator.tsx";
 import { processSegmentTitle, splitIntoProcessSegments } from "./row-model.ts";
@@ -36,6 +42,8 @@ import { transcriptPolicyFor, type TranscriptPolicy } from "./transcript-policy.
 import { StepProcessGroup } from "./StepProcessGroup.tsx";
 import { displayUserText, parseSkillCall, skillCommandLabel } from "./skill-block.ts";
 import { groupTurns, type RailTurn } from "./turn-rail.ts";
+import { planDocsOf, type PlanDoc } from "./plan-docs.ts";
+import { PlanCard } from "./PlanCard.tsx";
 import { textFromContent, type ConversationView, type ToolExecution } from "./useConversation.ts";
 import { useDelayedFlag } from "../../lib/use-delayed-flag.ts";
 import { Glyph } from "../../components/dsh-icons.tsx";
@@ -80,6 +88,9 @@ const TAIL_FULL = Number.POSITIVE_INFINITY;
 /** Scroll the transcript this close to the mounted top and the rest mounts now. */
 const TOP_BACKFILL_PX = 160;
 
+/** The shared empty vocabulary, so a turn with no files keeps one stable prop value. */
+const EMPTY_REF_PATHS: readonly TurnRefPath[] = [];
+
 /** Distance from the bottom edge — the one number every decision here uses. */
 function distanceFromBottom(element: HTMLElement): number {
   return element.scrollHeight - element.scrollTop - element.clientHeight;
@@ -111,7 +122,10 @@ function BlockView({
 } & PathContext) {
   if (block.type === "text") {
     const text = (block as TextBlock).text;
-    return text.length > 0 ? <Markdown text={text} /> : null;
+    // `streaming` is the whole gate on file chips: a half-written path is not a
+    // reference yet, and the vocabulary the finished answer will have is not
+    // known while it is still arriving.
+    return text.length > 0 ? <Markdown text={text} streaming={streaming} /> : null;
   }
   if (block.type === "thinking") {
     return (
@@ -223,6 +237,9 @@ function TurnBody({
   processDurationMs,
   previewSettled,
   expandProcessRows,
+  refPaths = EMPTY_REF_PATHS,
+  onOpenFile,
+  onImageUrl,
   cwd,
   home,
 }: {
@@ -248,8 +265,57 @@ function TurnBody({
   previewSettled: boolean;
   /** Whether every process row opens its own body — the verbose display. */
   expandProcessRows: boolean;
+  /**
+   * The files this turn's tool calls named, in first-seen order.
+   *
+   * Computed by the list rather than here because a turn's vocabulary belongs
+   * with the turn's messages, and because `steps` is rebuilt on every render —
+   * a provider keyed off it would hand every `Markdown` below a new delegate and
+   * undo the memo that keeps a streaming answer from re-parsing itself.
+   */
+  refPaths?: readonly TurnRefPath[] | undefined;
+  /** Open a file the answer points at; absent means references stay text. */
+  onOpenFile?: ((path: string, position: { line?: number | undefined; endLine?: number | undefined }) => void) | undefined;
+  /** The URL for an image's hover preview; absent means no preview. */
+  onImageUrl?: ((path: string) => string | undefined) | undefined;
 } & PathContext) {
   const t = useT();
+
+  /**
+   * The turn's file vocabulary, as `Markdown` consumes it.
+   *
+   * `resolve` is the only place a token is allowed to become a file: it spells
+   * the token (`parsePathToken`) and then asks the turn's vocabulary which real
+   * file that is. A token the turn never named — or one whose basename belongs
+   * to two files — resolves to nothing and stays ordinary code, which is dsh's
+   * rule and the reason the renderer can safely guess at nothing.
+   */
+  const fileRefs = useMemo<FileRefDelegate | null>(() => {
+    if (onOpenFile === undefined || refPaths.length === 0) return null;
+    return {
+      resolve(token) {
+        const parsed = parsePathToken(token);
+        if (parsed === undefined) return undefined;
+        const path = resolveTurnRef(refPaths, parsed.path);
+        return path === undefined ? undefined : { ...parsed, path };
+      },
+      open(file) {
+        // A link the author wrote as an absolute path still opens the file the
+        // turn knows by its project-relative spelling — the same fold
+        // `resolve` makes for inline code.
+        onOpenFile(resolveTurnRef(refPaths, file.path) ?? file.path, {
+          line: file.line,
+          endLine: file.endLine,
+        });
+      },
+      ...(onImageUrl === undefined ? {} : { imageUrl: onImageUrl }),
+    };
+  }, [refPaths, onOpenFile, onImageUrl]);
+
+  /** A turn with no opener (or no files) renders exactly as it did before. */
+  const withRefs = (children: ReactNode): ReactNode =>
+    fileRefs === null ? children : <FileRefProvider delegate={fileRefs}>{children}</FileRefProvider>;
+
   const renderStep = (step: TurnStep) => (
     <BlockView
       key={`${String(step.messageIndex)}-${String(step.blockIndex)}`}
@@ -302,7 +368,7 @@ function TurnBody({
   };
 
   if (!compact) {
-    return (
+    return withRefs(
       <div className={styles.assistantTurn}>
         {segments.map((segment, index) => (
           <Fragment key={`segment-${String(index)}`}>
@@ -311,7 +377,7 @@ function TurnBody({
               : segment.steps.map((step) => renderStep(step))}
           </Fragment>
         ))}
-      </div>
+      </div>,
     );
   }
 
@@ -324,7 +390,7 @@ function TurnBody({
     if (segment.kind === "process") processSegments.push(segment.steps);
     else answerSteps.push(...segment.steps);
   }
-  return (
+  return withRefs(
     <div className={styles.assistantTurn}>
       {processSegments.length > 0 ? (
         <TurnProcessGroup durationMs={processDurationMs}>
@@ -342,7 +408,7 @@ function TurnBody({
           {renderStep(step)}
         </div>
       ))}
-    </div>
+    </div>,
   );
 }
 
@@ -378,6 +444,24 @@ function failedAnswerOf(messages: readonly AgentMessage[]): AssistantMessage | n
     if (message === undefined || message.role !== "assistant") continue;
     const assistant = message as AssistantMessage;
     return assistant.stopReason === "error" ? assistant : null;
+  }
+  return null;
+}
+
+/**
+ * The answer pi stopped at the output-token cap, if that is how the turn ended.
+ *
+ * Same shape as `failedAnswerOf`: only the turn's *last* assistant message
+ * counts, because pi stamps `stopReason: "length"` on the message it truncated —
+ * an earlier `length` message inside the turn was a mid-turn step, and the turn
+ * carried on past it.
+ */
+function truncatedAnswerOf(messages: readonly AgentMessage[]): AssistantMessage | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message === undefined || message.role !== "assistant") continue;
+    const assistant = message as AssistantMessage;
+    return assistant.stopReason === "length" ? assistant : null;
   }
   return null;
 }
@@ -570,7 +654,11 @@ export function MessageList({
   transcriptView = "detailed",
   onFork,
   onOpenChanges,
+  onOpenFile,
+  onImageUrl,
   onTurnChanges,
+  onOpenPlan,
+  onPlans,
   onRetry,
 }: {
   view: ConversationView;
@@ -591,11 +679,37 @@ export function MessageList({
    */
   onOpenChanges?: (turn: number, index: number) => void;
   /**
+   * Open a file an answer points at — a path in a link or in inline code that
+   * this turn's tool calls named — in the right sidebar, at the lines the
+   * reference asked for. Absent means references stay ordinary text, which is
+   * what the transcript does whenever it cannot address the panel.
+   */
+  onOpenFile?:
+    | ((path: string, position: { line?: number | undefined; endLine?: number | undefined }) => void)
+    | undefined;
+  /**
+   * The URL showing one path as a picture, for the hover preview on an image
+   * reference. Absent means references never preview — the decision about what
+   * counts as an image is the caller's, not the transcript's.
+   */
+  onImageUrl?: ((path: string) => string | undefined) | undefined;
+  /**
    * Publish every turn's changed files for the sidebar's review tab to read.
    * Absent means the review tab has nothing to draw — its data lives nowhere
    * else, because this project keeps no workspace snapshot to ask a server for.
    */
   onTurnChanges?: (changes: readonly TurnChanges[]) => void;
+  /**
+   * Open one submitted plan in the right sidebar. Absent means a plan card
+   * shows the document it recorded without offering the action.
+   */
+  onOpenPlan?: (plan: PlanDoc) => void;
+  /**
+   * Publish every plan this session submitted, for the sidebar's plan tab to
+   * read. Absent means that tab has nothing to draw — the documents live in
+   * `exit_plan_mode`'s calls, and only this component holds the transcript.
+   */
+  onPlans?: (plans: readonly PlanDoc[]) => void;
   /**
    * Send a failed turn's prompt again, with the pictures it carried. Absent
    * means the failure row reports without offering the action.
@@ -791,6 +905,28 @@ export function MessageList({
     }
     return map;
   }, [railItems, cwd, home, results]);
+
+  /**
+   * The files each turn named, keyed the same way as its changed files.
+   *
+   * Built from committed messages only, and deliberately: the vocabulary a chip
+   * resolves against is what the turn *said*, and while the answer streams there
+   * is nothing to resolve against anyway (chips are gated on `streaming`).
+   * Leaving the live tail out of the scan is what keeps this map identified by
+   * `railItems` — the same identity across every token of a stream — so the
+   * delegate handed to `Markdown` does not change mid-answer.
+   */
+  const refPathsByTurn = useMemo(() => {
+    const map = new Map<number, TurnRefPath[]>();
+    for (const group of railItems) {
+      const blocks = group.messages.flatMap((message) =>
+        message.role === "assistant" ? ((message as AssistantMessage).content ?? []) : [],
+      );
+      const paths = turnRefPaths(blocks, { cwd }, results);
+      if (paths.length > 0) map.set(group.turn, paths);
+    }
+    return map;
+  }, [railItems, cwd, results]);
   /**
    * Hand the sidebar what it cannot compute.
    *
@@ -803,6 +939,30 @@ export function MessageList({
     if (onTurnChanges === undefined) return;
     onTurnChanges(turnChangesList(turnFilesByTurn));
   }, [turnFilesByTurn, onTurnChanges]);
+
+  /**
+   * The plans each turn submitted, keyed the same way as its changed files.
+   *
+   * A turn can submit more than one plan — the first may be sent back — and all
+   * of them keep their cards: what a card records is that a plan was submitted,
+   * which is true whether or not it was approved (dsh keeps them for the same
+   * reason).
+   */
+  const plansByTurn = useMemo(() => {
+    const map = new Map<number, PlanDoc[]>();
+    for (const group of railItems) {
+      const plans = planDocsOf(group.messages);
+      if (plans.length > 0) map.set(group.turn, plans);
+    }
+    return map;
+  }, [railItems]);
+
+  // Hand the sidebar the documents it cannot compute, ascending by turn so a
+  // restored tab's lookup cannot depend on the order the map was built in.
+  useEffect(() => {
+    if (onPlans === undefined) return;
+    onPlans([...plansByTurn].sort(([left], [right]) => left - right).flatMap(([, plans]) => plans));
+  }, [plansByTurn, onPlans]);
 
   const turnMeta = useMemo(
     () => turnMetadata(railItems, view.forkPoints),
@@ -1077,7 +1237,9 @@ export function MessageList({
   const partialMerged = hasPartial && liveTurn !== null;
 
   return (
-    <div className={styles.scroll} ref={scrollRef} onScroll={onScroll}>
+    // data-conversation-scroll marks the scrollport for the width strips'
+    // wheel bridge (dsh's same-named contract).
+    <div className={styles.scroll} ref={scrollRef} data-conversation-scroll onScroll={onScroll}>
       <TurnNavigator
         items={railItems}
         activeTurn={activeTurn}
@@ -1087,6 +1249,9 @@ export function MessageList({
       />
 
       <div className={styles.column} ref={columnRef}>
+        {/* The baseline each todo row diffs against — one scan of the transcript
+            here, instead of every row walking it again. */}
+        <TodoBaselinesProvider messages={view.messages}>
         {showLoading ? <p className={styles.hint}>{t("message.loading")}</p> : null}
 
         {/* A checkpoint alone is not an empty session: it is what the context
@@ -1159,6 +1324,10 @@ export function MessageList({
           // recovered by the retry pi is running.
           const failed = isLiveTurn ? null : failedAnswerOf(group.messages);
           const retryPrompt = failed === null ? null : retryPromptOf(group.messages);
+          // The same read for a turn pi cut off at the output-token cap. A live
+          // turn is held back too: pi stamps `stopReason` only when the message
+          // assembles, but the retry-shaped logic keeps the two rows symmetric.
+          const truncated = isLiveTurn ? null : truncatedAnswerOf(group.messages);
 
           return (
             <div key={group.turn} className={styles.turn} data-turn={group.turn}>
@@ -1214,6 +1383,9 @@ export function MessageList({
                   previewSettled={settledReasoningPreview}
                   cwd={cwd}
                   home={home}
+                  refPaths={refPathsByTurn.get(group.turn) ?? EMPTY_REF_PATHS}
+                  {...(onOpenFile === undefined ? {} : { onOpenFile })}
+                  {...(onImageUrl === undefined ? {} : { onImageUrl })}
                 />
               ) : null}
               {/* A failed request, where the answer would have been. Held back
@@ -1233,6 +1405,11 @@ export function MessageList({
                       })}
                 />
               )}
+              {/* A turn pi cut off at the output-token cap: the answer above
+                  just stops mid-sentence, and this row is the only
+                  explanation. Sits where the failure row sits — right after
+                  what the model produced, before the turn-tail chrome. */}
+              {truncated === null ? null : <TurnTruncated />}
               {/* The turn's own edits, between the answer and the action row —
                   dsh's turn tail, where the card belongs to the turn that
                   caused it rather than to the transcript as a whole, and like
@@ -1243,6 +1420,12 @@ export function MessageList({
                   turn={group.turn}
                   {...(onOpenChanges === undefined ? {} : { onOpenChanges })}
                 />
+              ) : null}
+              {/* The turn's submitted plans, next to its changed files — dsh's
+                  turn tail holds both, and both belong to the turn that caused
+                  them rather than to the tool row that mentioned it. */}
+              {group.turn !== liveTurn && plansByTurn.has(group.turn) ? (
+                <PlanCard plans={plansByTurn.get(group.turn) ?? []} onOpenPlan={onOpenPlan} />
               ) : null}
               {group.messages.some((message) => message.role === "assistant") ? (
                 <MessageActions
@@ -1311,6 +1494,7 @@ export function MessageList({
         {/* A retry is a deliberate pause, so it replaces the status line rather
             than stacking under it. */}
         {view.retry ? <RetryNotice retry={view.retry} /> : null}
+        </TodoBaselinesProvider>
       </div>
 
       {/*

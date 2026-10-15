@@ -5,6 +5,7 @@ import { reloadOnceForStaleChunk } from "../../lib/stale-chunk.ts";
 import { BrowserTab } from "./BrowserTab.tsx";
 import { ChangesTab } from "./ChangesTab.tsx";
 import { FilesTab } from "./FilesTab.tsx";
+import { PlanTab } from "./PlanTab.tsx";
 import { PreviewTab } from "./PreviewTab.tsx";
 import { TurnChangesTab } from "./TurnChangesTab.tsx";
 import type { RightbarTab } from "./rightbar-state.ts";
@@ -96,6 +97,11 @@ function TabContent({ sessionPath, projectId, projectPath, tab, onOpenFile }: Ta
     return (
       <TurnChangesTab key={tab.id} sessionPath={sessionPath} tab={tab} onOpenFile={onOpenFile} />
     );
+  }
+  if (tab.kind === "plan") {
+    // The same bridge, for the same reason: the document is the one the
+    // conversation submitted, so the conversation is the one holding it.
+    return <PlanTab key={tab.id} sessionPath={sessionPath} tab={tab} />;
   }
   if (tab.kind === "terminal") {
     return (

@@ -113,6 +113,29 @@ export function extensionOf(name: string): string {
   return name.slice(index + 1).toLowerCase();
 }
 
+/**
+ * Extensions `/raw` streams as a picture.
+ *
+ * Mirrored from the server's `IMAGE_MIME` on purpose: this side decides whether
+ * a file reference gets a hover preview and the server decides whether that URL
+ * will answer, so a list that drifted would show a frame that never loads.
+ */
+const IMAGE_EXTENSIONS: ReadonlySet<string> = new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "bmp",
+  "ico",
+  "svg",
+]);
+
+/** Whether a file name is one the server will hand over as an image. */
+export function isImageName(name: string): boolean {
+  return IMAGE_EXTENSIONS.has(extensionOf(name));
+}
+
 /** The shiki language for a file name, or undefined to render it unhighlighted. */
 export function languageFor(name: string): string | undefined {
   const extension = extensionOf(name);

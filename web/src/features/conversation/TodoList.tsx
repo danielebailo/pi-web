@@ -52,7 +52,8 @@ function PendingGlyph() {
   );
 }
 
-function StatusGlyph({ status }: { status: TodoStatus }) {
+/** Exported for the todo row's diff card, whose rows share these glyphs. */
+export function StatusGlyph({ status }: { status: TodoStatus }) {
   switch (status) {
     case "completed":
       return <CompletedGlyph />;

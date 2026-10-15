@@ -7,8 +7,16 @@ import { actions, appStore, commandsKey, isDraftSession, useT } from "../../lib/
 import { useStore } from "../../lib/store.ts";
 import { presetDescription, presetName } from "../../lib/presets.ts";
 import { rightbarActions, rightbarStore } from "../rightbar/rightbar-state.ts";
+import { isImageName } from "../rightbar/file-kind.ts";
 import { layoutActions, layoutStore, sidebarGeometry } from "../../layout/layout-state.ts";
 import { publishTurnChanges, type TurnChanges } from "../rightbar/turn-changes-store.ts";
+import {
+  publishPlans as publishPlansToStore,
+  rememberTemporaryPlan,
+} from "../rightbar/plan-store.ts";
+import { REVIEW_TARGET_PREFIX } from "../rightbar/rightbar-state.ts";
+import type { PlanReviewTarget } from "./QuestionComposer.tsx";
+import type { PlanDoc } from "./plan-docs.ts";
 import { PanelRightIcon } from "../rightbar/rightbar-icons.tsx";
 import { shortcutTitle } from "../rightbar/shortcuts.ts";
 import { DEFAULT_PRESET_ID, type ImageBlock } from "../../lib/types.ts";
@@ -16,11 +24,13 @@ import { Composer } from "./Composer.tsx";
 import { QuestionCard } from "./QuestionCard.tsx";
 import { QuestionComposer } from "./QuestionComposer.tsx";
 import { PendingQuestions } from "./PendingQuestions.tsx";
+import { QueueDock } from "./QueueDock.tsx";
 import { askUserQuestions } from "./question-model.ts";
 import { SessionStats } from "./SessionStats.tsx";
 import { MessageList } from "./MessageList.tsx";
+import { ConversationWidthControls } from "./ConversationWidthControls.tsx";
 import { NewSessionHero } from "./NewSessionHero.tsx";
-import { parseBuiltinCommand, unknownCommandName } from "./slash.ts";
+import { extensionCommandName, parseBuiltinCommand, planCommandOf, unknownCommandName } from "./slash.ts";
 import { TodoPanel } from "./TodoPanel.tsx";
 import { useComposerState } from "./useComposerState.ts";
 import { useConversation } from "./useConversation.ts";
@@ -125,6 +135,9 @@ function PresetSwitch({
 export function ConversationPane() {
   const t = useT();
   const state = useStore(appStore);
+  // The width axis lives on the pane root; the drag strips read it through
+  // this ref and publish the measured column width back onto it.
+  const paneRef = useRef<HTMLDivElement>(null);
   // A draft has no pi process yet, so the conversation runs without a path
   // until the spawn resolves and swaps the real one in.
   const selected = state.selectedSessionPath;
@@ -146,7 +159,10 @@ export function ConversationPane() {
   // The model picker and context ring describe the session the text goes into.
   // They read from the session file until a pi process is needed, which is only
   // when the user actually opens one of them — see `useComposerState`.
-  const composer = useComposerState({ sessionPath, projectId: null });
+  // The selected path, draft included: a draft is where a `/plan` typed before
+  // the session exists has to live (see `useComposerState`), and it becomes
+  // the real path a moment later.
+  const composer = useComposerState({ sessionPath: selected, projectId: null });
 
   /**
    * Hand each turn's changed files to the review tabs.
@@ -162,7 +178,100 @@ export function ConversationPane() {
     [sessionPath],
   );
 
+  /**
+   * Hand each submitted plan to the plan tabs, and open one when asked.
+   *
+   * The same bridge as the review tabs, for the documents `exit_plan_mode`
+   * wrote: the conversation owns the transcript, the sidebar owns a tab, and
+   * `plan-store` is where they meet. Both are keyed by the plan's `callId`, so
+   * the card, the review's link and a restored tab all name the same document.
+   */
+  const publishPlans = useCallback(
+    (plans: readonly PlanDoc[]) => {
+      if (sessionPath !== null) publishPlansToStore(sessionPath, plans);
+    },
+    [sessionPath],
+  );
+  const openPlan = useCallback(
+    (plan: PlanDoc) => {
+      if (sessionPath !== null) rightbarActions.openPlanTab(sessionPath, plan.callId, plan.title);
+    },
+    [sessionPath],
+  );
+
+  /**
+   * Plan mode, as the session's own log records it.
+   *
+   * A stance rather than a composition: it can be switched at any point, and
+   * the switch is a pi extension command, so the chip reports what the file
+   * says after the round trip instead of predicting it. It is drawn only for a
+   * session that exists — plan mode has nothing to attach to in the hero — and
+   * the chip itself draws only while the mode is on (dsh's rule: entering is
+   * `/plan`, the chip is the way out).
+   */
+  /**
+   * Leave plan mode.
+   *
+   * The chip's job, and it is an extension command either way: a real session
+   * runs it through the switch endpoint (which answers with the process's own
+   * view), while a draft has no process to run it in — so the exit is queued like
+   * any other message and the chip goes out locally now.
+   */
+  const exitPlan = useCallback(async (): Promise<void> => {
+    if (sessionPath !== null) return composer.selectPlan(false);
+    const realPath = await actions.resolveDraftSession();
+    composer.markPlan(false);
+    if (realPath !== null) actions.queuePendingPrompt(realPath, "/plan off", "prompt", []);
+  }, [sessionPath, composer]);
+
+  const plan = selected !== null
+    ? { active: composer.state?.planMode === true, onExit: exitPlan }
+    : undefined;
+
+  /**
+   * Open a review's plan in the right sidebar, returning whether it landed.
+   *
+   * A logged plan is addressed by its `exit_plan_mode` call and the tab reads it
+   * back out of the transcript; one with no call exists only in the card, so the
+   * document is remembered under the request's own key and the address says so
+   * (see `plan-store.ts`). `false` means there was no sidebar to address yet —
+   * the caller keeps its automatic open pending.
+   */
+  const openPlanFromReview = useCallback(
+    (target: PlanReviewTarget): boolean => {
+      if (sessionPath === null) return false;
+      if (target.callId !== undefined) {
+        rightbarActions.openPlanTab(sessionPath, target.callId, target.title);
+        return true;
+      }
+      if (target.requestId === undefined) return false;
+      rememberTemporaryPlan(target.requestId, { title: target.title, plan: target.plan });
+      rightbarActions.openPlanTab(
+        sessionPath,
+        `${REVIEW_TARGET_PREFIX}${target.requestId}`,
+        target.title,
+      );
+      return true;
+    },
+    [sessionPath],
+  );
+
   const project = state.projects.find((candidate) => candidate.id === state.selectedProjectId);
+  /**
+   * Where a referenced picture's bytes come from.
+   *
+   * Built here rather than inside the transcript because it needs the project —
+   * and because "is this an image?" is a property of the deployment's file
+   * service, not of a sentence. `/raw` streams the bytes so the `<img>` can
+   * cache and decode them itself; a path the server would not serve as a picture
+   * simply gets no hover preview.
+   */
+  const projectId = project?.id;
+  const imageUrlFor = useCallback(
+    (path: string): string | undefined =>
+      projectId === undefined || !isImageName(path) ? undefined : api.workspaceRawUrl(projectId, path),
+    [projectId],
+  );
   const sessions = state.selectedProjectId ? (state.sessions[state.selectedProjectId] ?? []) : [];
   const session = sessions.find((candidate) => candidate.path === selected);
   const isExternal = selected ? Boolean(state.externalChanged[selected]) : false;
@@ -245,6 +354,41 @@ export function ConversationPane() {
         return true;
       }
 
+      // An extension command is the third kind of slash text, and the only one
+      // pi records no user turn for: it consumes the command and writes only
+      // what the command itself submits. So it goes out without the optimistic
+      // turn — pi's own message is adopted from the stream instead, and a
+      // command that submits nothing (a bare `/plan`) leaves no row behind.
+      // `/plan` is recognised by its own text rather than by waiting for the
+      // command listing: a fresh session's list lands a second or two after the
+      // composer becomes usable, and the mode switch must not depend on that race
+      // (the listing also decides whether the optimistic turn is drawn, so losing
+      // the race used to leave a message pi never recorded). Every other
+      // extension command still needs the listing to know it is one.
+      const wantsPlan = planCommandOf(text);
+      const planCommand = wantsPlan !== null;
+      // The mode flips locally first. pi writes a session lazily, so the file
+      // cannot confirm a switch made before the first message, and a draft
+      // session has no process to ask either — `syncPlan` settles it the moment
+      // there is something authoritative to ask (see `useComposerState`).
+      if (wantsPlan !== null) composer.markPlan(wantsPlan);
+
+      const extension = planCommand && sessionPath !== null
+        ? "plan"
+        : commandsLoaded && sessionPath !== null
+          ? extensionCommandName(text, commands)
+          : null;
+      if (extension !== null) {
+        const sent = await conversation.runCommand(text, images);
+        if (wantsPlan !== null) {
+          // A command that landed is confirmed by the process, not by the file
+          // it has not written yet; one that did not is rolled back.
+          if (sent) void composer.syncPlan();
+          else composer.markPlan(!wantsPlan);
+        }
+        return sent;
+      }
+
       // A command nothing registered is not a command. pi would pass it through
       // to the model as ordinary text, which reads like a command that did
       // nothing — so say so, and still send it: the user may have meant the
@@ -259,11 +403,34 @@ export function ConversationPane() {
       if (!draft) return false;
       const realPath = await actions.resolveDraftSession();
       if (!realPath) return false;
-      actions.queuePendingPrompt(realPath, text, mode, images);
+      // A draft's command is queued with the flag that says so: when the session
+      // appears it is sent as a command, not as the optimistic user turn a plain
+      // prompt gets (pi never records the typed line for one).
+      actions.queuePendingPrompt(realPath, text, mode, images, planCommand || extension !== null);
       return true;
     },
-    [sessionPath, draft, conversation, commands, commandsLoaded, t],
+    [sessionPath, draft, conversation, composer, commands, commandsLoaded, t],
   );
+
+  /**
+   * Settle a plan switch once the session can answer for itself.
+   *
+   * A `/plan` typed in a session with no process yet (a draft, or one whose pi
+   * has not started) is only local; the session becoming addressable is when a
+   * process exists to ask. The callback is held in a ref so this runs on the
+   * switch alone — depending on the composer object would re-ask on every read.
+   */
+  const syncPlanRef = useRef(composer.syncPlan);
+  syncPlanRef.current = composer.syncPlan;
+  useEffect(() => {
+    if (sessionPath === null) return;
+    // A `/plan` queued in a draft reaches pi a beat after the path appears, so
+    // the first ask can be too early; one retry catches it. The local value
+    // stands in the meantime — see `markPlan`.
+    void syncPlanRef.current();
+    const timer = window.setTimeout(() => void syncPlanRef.current(), 900);
+    return () => window.clearTimeout(timer);
+  }, [sessionPath]);
 
   const reload = async (): Promise<void> => {
     await conversation.reload();
@@ -333,12 +500,18 @@ export function ConversationPane() {
         timeoutMs={typeof pendingUi.request.timeout === "number" ? pendingUi.request.timeout : null}
         draftKey={pendingUi.request.id}
         sessionLabel={pendingSession?.title}
+        onOpenPlan={openPlanFromReview}
         onOpenSession={
           pendingSession ? () => actions.selectSession(pendingUi.sessionPath) : undefined
         }
         onSubmit={async (decision) => {
           await api.respondToUiRequest(pendingUi.request.id, decision);
           actions.dismissUiRequest(pendingUi.request.id);
+          // A plan review answers a mode switch as well as a verdict: approving
+          // leaves plan mode, and the process knows that before any file does —
+          // so ask it now instead of waiting for the next settled turn to read
+          // the session back.
+          void composer.syncPlan();
         }}
       />
     ) : (
@@ -412,7 +585,10 @@ export function ConversationPane() {
     ) : null;
 
   return (
-    <div className={styles.pane}>
+    <div className={styles.pane} ref={paneRef}>
+      {/* The transcript width axis: measured here, dragged at the gutters,
+          consumed by the column and composer as --conversation-content-width. */}
+      <ConversationWidthControls hostRef={paneRef} />
       <header className={styles.header} data-window-drag>
         <button
           type="button"
@@ -475,7 +651,15 @@ export function ConversationPane() {
               // visible.
               onOpenChanges: (turn: number, index: number) =>
                 rightbarActions.openTurnChangesTab(sessionPath, turn, index),
+              // A file an answer points at opens the same way, at the lines the
+              // reference asked for — the panel is where the file lives, and the
+              // chip is only the way in.
+              onOpenFile: (path: string, position: { line?: number; endLine?: number }) =>
+                rightbarActions.openFileRef(sessionPath, path, position),
+              onImageUrl: imageUrlFor,
               onTurnChanges: publishChanges,
+              onPlans: publishPlans,
+              onOpenPlan: openPlan,
               // pi has no "try that turn again" RPC — its own retry loop is the
               // only one it offers, and it runs inside a turn. Re-sending the
               // prompt is the lever that exists, and it costs a second copy of
@@ -499,6 +683,11 @@ export function ConversationPane() {
           await conversation.send(text, "prompt");
         }}
       />
+      {/* The sends pi has not taken up yet, with the exits the transcript rows
+          cannot offer: drop one, or fix a typo before the model ever sees it.
+          dsh seats its queue dock on the input card; this sits beside the other
+          strips for the same reason they do. */}
+      <QueueDock queue={conversation.queue} onRemove={conversation.queueRemove} onEdit={conversation.queueEdit} />
       {/* One seat, two occupants: a pending question replaces the input rather
           than stacking above it, so the card cannot be confused for a message
           that has already been sent. */}
@@ -525,6 +714,7 @@ export function ConversationPane() {
           }
           onSend={sendMessage}
           onAbort={() => void conversation.abort()}
+          plan={plan}
           workspacePath={project?.path}
         />
       )}

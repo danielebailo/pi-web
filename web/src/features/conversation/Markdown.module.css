@@ -128,3 +128,54 @@
   background: var(--dsw-alias-bg-layer-2);
   font-weight: 600;
 }
+
+/*
+ * The document rhythm: dsh's `MarkdownText.module.css` gaps, for a surface that
+ * reads a whole document rather than one message among many. The sizes are the
+ * same tokens as above — only the air between blocks changes, and it is what a
+ * plan in the right sidebar needs to read as a document instead of as a wall of
+ * transcript.
+ *
+ * These rules are written after the base ones on purpose. `.markdown h1` and
+ * `.document h1` have the same specificity, so order is what makes the variant
+ * win; the base `:first-child`/`:last-child` resets outrank both (two classes
+ * to one), so a document still starts and ends flush.
+ */
+.document h1,
+.document h2,
+.document h3 {
+  margin: 32px 0 16px;
+}
+
+.document h4,
+.document h5,
+.document h6 {
+  margin: 16px 0;
+}
+
+.document p {
+  margin: 16px 0;
+}
+
+.document ul,
+.document ol {
+  margin: 16px 0;
+  padding-left: 18px;
+}
+
+.document li:not(:first-child) {
+  margin-top: 6px;
+}
+
+.document hr {
+  margin: 32px 0;
+}
+
+.document blockquote {
+  margin: 16px 0 0;
+}
+
+/* dsh reads document prose a notch lighter than the browser default. */
+.document strong {
+  font-weight: 600;
+}

@@ -219,6 +219,14 @@ export interface AskUserQuestionIntent {
   kind: "plan-review";
   /** The option label that approves the plan; every other label declines it. */
   approve: string;
+  /**
+   * The tool invocation that submitted the plan, when the asker named one.
+   *
+   * dsh carries it so a client can reopen the *logged* plan after the review
+   * closes; the review card's "open the plan in the sidebar" is that same move
+   * here, and it is also how the tab finds the document again after a reload.
+   */
+  callId?: string;
 }
 
 /**
@@ -357,6 +365,23 @@ export interface ComposerState {
    * `agent-preset-locked` line, measured in pi's own evidence.
    */
   presetLocked?: boolean;
+  /**
+   * Whether the session file exists at all.
+   *
+   * pi writes a session lazily — on the first real message — so before that
+   * there is nothing on disk to read a mode from. A client that has just asked
+   * for a mode switch holds the value locally until this says `true`, because
+   * until then a read of the file cannot deny what the process already recorded.
+   */
+  sessionOnDisk?: boolean;
+  /**
+   * Whether plan mode is active on this session.
+   *
+   * Absent on the project read, like `presetId`: plan mode belongs to a session
+   * that exists, and its state is one entry in that session's own log
+   * (`server/src/session-plan.ts`). The header shows it next to the composition.
+   */
+  planMode?: boolean;
 }
 
 /** The composition a session runs when the caller named none. */
@@ -461,6 +486,8 @@ export interface WorkspaceTextPage {
   offset: number;
   nextOffset: number;
   lines: number;
+  /** The file line this page starts at, when the read was addressed by line. */
+  startLine?: number;
   text: string;
   size: number;
   eof: boolean;
@@ -787,6 +814,27 @@ export interface PiVersionInfo {
   skipped: boolean;
 }
 
+/**
+ * Whether a newer pi-web-simple is published, resolved by the server against
+ * the npm registry. Same shape as `PiVersionInfo` so one rule can render both.
+ */
+export interface AppVersionInfo {
+  /** The running copy's version, or null when the server could not read it. */
+  current: string | null;
+  /** Newest version npm serves under the `latest` tag, or null. */
+  latest: string | null;
+  available: boolean;
+  packageName: string;
+  /** The update command, or the release page in the desktop shell. */
+  updateCommand: string;
+  /** False in the desktop shell, where this service cannot carry the update out. */
+  managed: boolean;
+  /** Why the check produced no answer — same rule as `PiVersionInfo.error`. */
+  error: string | null;
+  /** The check was deliberately skipped (`PI_OFFLINE` / `PI_SKIP_VERSION_CHECK`). */
+  skipped: boolean;
+}
+
 /** One installed pi package pi reports as behind its upstream. */
 export interface ExtensionUpdate {
   /** The source string as pi's settings record it; matches `ExtensionItem.source`. */
@@ -802,6 +850,8 @@ export interface ExtensionUpdate {
  */
 export interface UpdatesView {
   pi: PiVersionInfo;
+  /** Whether pi-web-simple itself is behind the npm registry. */
+  app: AppVersionInfo;
   extensions: ExtensionUpdate[];
   /** A package check that broke (not "no updates"); the list stays empty. */
   extensionsError: string | null;

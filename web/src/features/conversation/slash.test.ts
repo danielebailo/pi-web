@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SlashCommand } from "../../lib/types.ts";
-import { detectSlashTrigger, filterCommands, parseBuiltinCommand, unknownCommandName } from "./slash.ts";
+import { detectSlashTrigger, extensionCommandName, filterCommands, parseBuiltinCommand, planCommandOf, unknownCommandName } from "./slash.ts";
 
 describe("detectSlashTrigger", () => {
   it("finds a slash at the start of the input", () => {
@@ -162,6 +162,7 @@ const runnable: SlashCommand[] = [
   { name: "compact", source: "builtin" },
   { name: "name", source: "builtin" },
   { name: "skill:pdf-tools", source: "skill" },
+  { name: "plan", source: "extension" },
 ];
 
 describe("parseBuiltinCommand", () => {
@@ -217,5 +218,46 @@ describe("unknownCommandName", () => {
     expect(unknownCommandName("fix /etc/hosts", runnable)).toBeNull();
     expect(unknownCommandName("/etc/hosts", runnable)).toBeNull();
     expect(unknownCommandName("/compact/now", runnable)).toBeNull();
+  });
+});
+
+describe("extensionCommandName", () => {
+  it("names a command this composition registered as an extension", () => {
+    expect(extensionCommandName("/plan", runnable)).toBe("plan");
+    expect(extensionCommandName("/plan 重构登录", runnable)).toBe("plan");
+  });
+
+  it("leaves the other two kinds of slash text alone", () => {
+    // A built-in maps to its own RPC, and a skill or template is expanded by pi
+    // into an ordinary prompt — neither suppresses the optimistic user turn.
+    expect(extensionCommandName("/compact", runnable)).toBeNull();
+    expect(extensionCommandName("/skill:pdf-tools extract", runnable)).toBeNull();
+  });
+
+  it("ignores an unregistered name, text, and paths", () => {
+    expect(extensionCommandName("/review", runnable)).toBeNull();
+    expect(extensionCommandName("hello", runnable)).toBeNull();
+    expect(extensionCommandName("fix /etc/hosts", runnable)).toBeNull();
+    expect(extensionCommandName("/etc/hosts", runnable)).toBeNull();
+    expect(extensionCommandName("/plan/now", runnable)).toBeNull();
+  });
+});
+
+describe("planCommandOf", () => {
+  it("says which way the command points", () => {
+    expect(planCommandOf("/plan")).toBe(true);
+    // A message rides along with the switch; it is still an enter.
+    expect(planCommandOf("/plan 重构登录")).toBe(true);
+    expect(planCommandOf("/plan off")).toBe(false);
+    expect(planCommandOf("  /plan off  ")).toBe(false);
+  });
+
+  it("answers nothing for anything else", () => {
+    // `/plan off` with a message is not the exit form: it is an enter whose
+    // request happens to start with the word.
+    expect(planCommandOf("/plan off please")).toBe(true);
+    expect(planCommandOf("/planning")).toBeNull();
+    expect(planCommandOf("plan")).toBeNull();
+    expect(planCommandOf("/etc/hosts")).toBeNull();
   });
 });

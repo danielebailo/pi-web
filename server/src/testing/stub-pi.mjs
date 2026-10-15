@@ -65,6 +65,16 @@ const stubForkMessages = [];
 const stubTree = [];
 const stubLeafId = null;
 
+/**
+ * Session entries `get_entries` answers with.
+ *
+ * A test that needs the in-memory view to differ from the file sets
+ * STUB_ENTRIES — which is the whole point of reading the process: pi writes its
+ * session file lazily, so a switch made before the first message is only here.
+ */
+const stubEntries = process.env.STUB_ENTRIES ? JSON.parse(process.env.STUB_ENTRIES) : [];
+const stubEntriesLeaf = process.env.STUB_ENTRIES_LEAF ?? (stubEntries.at(-1)?.id ?? null);
+
 const stubCommands = process.env.STUB_COMMANDS
   ? JSON.parse(process.env.STUB_COMMANDS)
   : minimalComposition
@@ -146,6 +156,21 @@ process.stdin.on("data", (chunk) => {
       }
       case "get_messages":
         respond("get_messages", { messages: stubMessages }, message.id);
+        break;
+      case "get_entries":
+        // A test can make the process unable to answer, which is how the route's
+        // file fallback gets exercised (a process that went away mid-request).
+        if (process.env.STUB_FAIL_GET_ENTRIES) {
+          write({
+            id: message.id,
+            type: "response",
+            command: "get_entries",
+            success: false,
+            error: "stub cannot read entries",
+          });
+          break;
+        }
+        respond("get_entries", { entries: stubEntries, leafId: stubEntriesLeaf }, message.id);
         break;
       // The real pi answers this from the live session; the stub reports one
       // fork target per user message so the routes can be exercised.

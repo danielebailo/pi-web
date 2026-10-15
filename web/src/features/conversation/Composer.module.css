@@ -29,7 +29,9 @@
 .composer {
   position: relative;
   box-sizing: border-box;
-  max-width: 780px;
+  /* The pane's shared width axis, so the input tracks the transcript column
+     the way dsh's composer tracks --dsh-chat-content-width. */
+  max-width: var(--conversation-content-width, 780px);
   margin: 0 auto;
   display: flex;
   flex-direction: column;

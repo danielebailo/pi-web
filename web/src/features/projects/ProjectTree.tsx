@@ -4,6 +4,7 @@ import { EyeOffIcon } from "../../components/icons.tsx";
 import { actions, appStore, isDraftSession, SESSIONS_PAGE_SIZE, useT } from "../../lib/app-state.ts";
 import { Glyph } from "../../components/dsh-icons.tsx";
 import { StateDot, type StateDotState } from "../../components/StateDot.tsx";
+import { pendingAskOf, type PendingAsk } from "../conversation/question-model.ts";
 import type { MessageKey } from "../../lib/i18n/index.ts";
 import { formatRelativeTime } from "../../lib/format.ts";
 import type { ProjectNode } from "../../lib/project-tree.ts";
@@ -72,6 +73,11 @@ interface RowProps {
  * outranks a finished run the user has not opened — the same order as dsh's
  * `sessionStatuses`. `label` is the wording a screen reader hears; the mark
  * carries it visually.
+ *
+ * A plan awaiting review is its own state rather than a flavour of "waiting for
+ * your answer": dsh draws it as one (`Plan awaiting review`, with the row's
+ * timestamp replaced by `Plan review`), and the two blocks ask for different
+ * things — an answer, and a verdict on a document.
  */
 interface SessionStatus {
   state: StateDotState;
@@ -81,9 +87,10 @@ interface SessionStatus {
 /** The run-state mark one session row shows, from its two inputs. */
 export function sessionStatus(
   activity: "ongoing" | "done" | undefined,
-  pending: boolean,
+  pending: PendingAsk | null,
 ): SessionStatus | undefined {
-  if (pending) return { state: "warning", label: "session.statusWaitingAnswer" };
+  if (pending === "plan-review") return { state: "warning", label: "session.statusPlanReview" };
+  if (pending === "question") return { state: "warning", label: "session.statusWaitingAnswer" };
   if (activity === "ongoing") return { state: "ongoing", label: "session.statusRunning" };
   if (activity === "done") return { state: "done", label: "session.statusCompleted" };
   return undefined;
@@ -255,9 +262,9 @@ export function ProjectTreeItem({
   const remaining = rows.remaining;
 
   const selected = state.selectedSessionPath;
-  /** True when this row's session is the one an extension is blocked on. */
-  const pendingFor = (path: string | null): boolean =>
-    path !== null && state.pendingUiRequests.some((item) => item.sessionPath === path);
+  /** What an extension is blocked on in this row's session, or null. */
+  const pendingFor = (path: string | null): PendingAsk | null =>
+    pendingAskOf(state.pendingUiRequests, path);
 
   const renameProject = async (): Promise<void> => {
     const next = window.prompt(t("project.renamePrompt"), project.title);
@@ -408,23 +415,28 @@ export function ProjectTreeItem({
             />
           ))}
 
-          {shown.map((session) => (
-            <SessionRow
-              key={session.path}
-              sessionPath={session.path}
-              projectId={project.id}
-              title={session.title}
-              time={formatRelativeTime(session.modified, t)}
-              active={session.path === selected}
-              external={Boolean(state.externalChanged[session.path])}
-              status={sessionStatus(
-                state.sessionActivity[session.path],
-                pendingFor(session.path),
-              )}
-              indent={indent}
-              drag={drag.sessionRow(project.id, session.path)}
-            />
-          ))}
+          {shown.map((session) => {
+            const pending = pendingFor(session.path);
+            return (
+              <SessionRow
+                key={session.path}
+                sessionPath={session.path}
+                projectId={project.id}
+                title={session.title}
+                // A plan review takes the timestamp's place, which is dsh's
+                // treatment: what the row is waiting on matters more than when
+                // the session was last touched.
+                time={pending === "plan-review"
+                  ? t("session.planReviewTime")
+                  : formatRelativeTime(session.modified, t)}
+                active={session.path === selected}
+                external={Boolean(state.externalChanged[session.path])}
+                status={sessionStatus(state.sessionActivity[session.path], pending)}
+                indent={indent}
+                drag={drag.sessionRow(project.id, session.path)}
+              />
+            );
+          })}
 
           {remaining > 0 ? (
             <button

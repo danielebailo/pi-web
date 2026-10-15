@@ -115,3 +115,114 @@
   line-height: 20px;
   color: var(--dsw-alias-label-caption);
 }
+
+/* --- diff card (dsh's todo details) --- */
+
+/*
+ * The collapsed diff tally sits between the plan summary and the +N count, in
+ * the same muted voice — it is a second fact about the same write, not a
+ * headline of its own.
+ */
+.diffSummary {
+  flex: none;
+  margin-left: 6px;
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: calc(24px + var(--dsh-content-font-delta, 0px));
+  color: var(--dsw-alias-label-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.diff {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.diffCaption {
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: 20px;
+  color: var(--dsw-alias-label-caption);
+}
+
+.diffList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: var(--todo-list-max-height, 260px);
+  overflow-y: auto;
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+}
+
+/* Same row geometry as TodoList's, since the two lists read side by side. */
+.diffItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.diffItem .glyph {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+}
+
+/* Added and removed rows trade the status glyph for the mark, coloured. */
+.diffMark {
+  font-size: 14px;
+  line-height: 1;
+  font-weight: 500;
+}
+
+.diffItem[data-change="added"] .diffMark {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.diffItem[data-change="removed"] .diffMark {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.diffItem[data-change="removed"] .content {
+  color: var(--dsw-alias-label-caption);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 55%, transparent);
+}
+
+.diffItem .content {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The old status a write replaced, read after the row it belongs to. */
+.statusChange {
+  flex: none;
+  margin-left: 6px;
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-caption);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Untouched rows fold away under their count line. */
+.unchanged summary {
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: 20px;
+  color: var(--dsw-alias-label-caption);
+  cursor: pointer;
+}
+
+.unchanged[open] summary {
+  margin-bottom: 8px;
+}

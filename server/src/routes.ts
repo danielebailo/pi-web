@@ -16,6 +16,7 @@ import {
 import {
   UpdatesConfigError,
   readUpdates,
+  updateApp,
   updateExtension,
 } from "./updates.ts";
 import {
@@ -48,6 +49,13 @@ import {
 import { DEFAULT_LIMIT, searchWorkspaceFiles } from "./file-search.ts";
 import { TerminalManager, type TerminalHost } from "./terminal.ts";
 import { pendingUiRequests, type PendingUiRequests } from "./ui-requests.ts";
+import {
+  ConflictAfterRequeue,
+  mutateQueue,
+  parseQueueMode,
+  recordEnqueue,
+  type QueueAction,
+} from "./queue.ts";
 import {
   THINKING_LEVELS,
   readComposerFromClient,
@@ -85,6 +93,7 @@ import { DEFAULT_PRESET_ID, findPreset, listPresets } from "./presets.ts";
 import { deleteSession } from "./session-delete.ts";
 import { openSessionForRead } from "./session-open.ts";
 import { presetIdOfSession, readSessionComposition } from "./session-preset.ts";
+import { readSessionPlanActive, planActiveOfEntries } from "./session-plan.ts";
 import { assertAllowedSessionPath, getSessionRoot, sessionDirFor } from "./session-path.ts";
 import { readSessionSnapshot } from "./session-reader.ts";
 import {
@@ -258,6 +267,13 @@ function requireNumber(body: Record<string, unknown>, key: string): number {
   return value;
 }
 
+/** A whole number from the request body — a queue position, for one. */
+function requireInt(body: Record<string, unknown>, key: string): number {
+  const value = requireNumber(body, key);
+  if (!Number.isInteger(value)) throw badRequest(`${key} must be an integer`);
+  return value;
+}
+
 /**
  * The model a new session should start on, as the hero's picker sends it.
  *
@@ -318,8 +334,20 @@ function optionalPresetId(body: Record<string, unknown>): string {
  * separate endpoint would be a second round trip for one string. It is a
  * property of the session, not of the input bar, which is why it is merged in
  * by the route rather than produced by `composer.ts`.
+ *
+ * `planMode` rides along for exactly the same reason: it is a property of the
+ * session (one log entry, `session-plan.ts`), and the header shows it beside
+ * the composition. `sessionOnDisk` says whether the session file exists at all,
+ * which is what lets a client tell "the mode is off" apart from "there is no
+ * file yet to say anything" — pi writes a session lazily, so a switch made in a
+ * session that has not spoken exists only in the process.
  */
-type SessionComposerState = ComposerState & { presetId: string; presetLocked: boolean };
+type SessionComposerState = ComposerState & {
+  presetId: string;
+  presetLocked: boolean;
+  planMode: boolean;
+  sessionOnDisk: boolean;
+};
 
 /**
  * The formats a provider will actually decode. The same list the composer
@@ -699,6 +727,23 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
    * flight, and the alternative is showing raw model ids where the settings page
    * shows names.
    */
+  /**
+   * Plan mode as the running process holds it, falling back to the file.
+   *
+   * The file lags the process — pi writes a session lazily, on the first real
+   * message — so a switch made in a session that has not spoken yet exists only
+   * in memory, and `get_entries` is the only thing that can see it. The file is
+   * the fallback for a process that went away between the command and this read.
+   */
+  const planModeNow = async (handle: SessionHandle, sessionPath: string): Promise<boolean> => {
+    try {
+      const { entries, leafId } = await callClient(handle, () => handle.client.getEntries());
+      return planActiveOfEntries(entries, leafId);
+    } catch {
+      return readSessionPlanActive(sessionPath);
+    }
+  };
+
   const liveComposer = async (handle: SessionHandle): Promise<SessionComposerState> => {
     const catalog = await readModelCatalog();
     const state = await callClient(handle, () => readComposerFromClient(handle.client, catalog));
@@ -710,6 +755,9 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
       ...state,
       presetId: handle.presetId,
       presetLocked: readSessionComposition(handle.sessionPath).locked,
+      // The process is the authority while one is here; see `planModeNow`.
+      planMode: await planModeNow(handle, handle.sessionPath),
+      sessionOnDisk: existsSync(handle.sessionPath),
     };
   };
 
@@ -723,7 +771,13 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
     try {
       const state = await readComposerFromDisk(sessionPath, catalog);
       const { presetId, locked } = readSessionComposition(sessionPath);
-      return { ...state, presetId, presetLocked: locked };
+      return {
+        ...state,
+        presetId,
+        presetLocked: locked,
+        planMode: readSessionPlanActive(sessionPath),
+        sessionOnDisk: existsSync(sessionPath),
+      };
     } catch (err) {
       throw notFound(`无法读取会话：${(err as Error).message}`);
     }
@@ -1036,6 +1090,19 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
     json(res, 200, view);
   });
 
+  /**
+   * Update this deployment itself to the version npm calls latest.
+   *
+   * Distinct from the extension route in the one way that matters: the code
+   * this replaces is already running, so a successful response means new files
+   * on disk, not a new program in memory. The page says so; nothing here tries
+   * to restart the process, because doing that from inside the request that is
+   * holding it open would kill the answer before it was sent.
+   */
+  route("POST", "/api/updates/app", async ({ res, body }) => {
+    json(res, 200, await updateApp(optionalProjectPath(asObject(body))));
+  });
+
   // --- MCP servers ----------------------------------------------------------
 
   /**
@@ -1271,13 +1338,20 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
    * reading it whole would have. `offset` is a byte offset from the previous
    * page, not a line number — a line number would mean rescanning the file from
    * the start for every page.
+   *
+   * `fromLine` is the exception, for a reader that wants one line rather than
+   * the head of the file: it scans once, here, and answers with the page that
+   * contains it (a little above it, so there is something to scroll back into).
+   * It is only read on the first page; the pages after it walk by offset again.
    */
   route("GET", "/api/projects/:id/text", async ({ res, params, query }) => {
     const project = await getProject(params.id!);
     const path = query.get("path") ?? "";
     if (path.length === 0) throw badRequest("path is required");
     const offset = Number(query.get("offset") ?? "0");
-    json(res, 200, await readWorkspaceTextPage(project.path, path, offset));
+    const line = query.get("fromLine");
+    const fromLine = line === null ? undefined : Number(line);
+    json(res, 200, await readWorkspaceTextPage(project.path, path, offset, fromLine));
   });
 
   /**
@@ -1723,6 +1797,9 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
     const { message, images } = messageWithImages(asObject(body));
     const handle = await openSession(sessionPath);
     await callClient(handle, () => handle.client.steer(message, images));
+    // The queue mirror needs the payloads this server saw; pi's queue_update
+    // only reports texts, so the images of a queued message live only here.
+    recordEnqueue(handle, "steer", message, images);
     json(res, 200, { ok: true });
   });
 
@@ -1731,7 +1808,49 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
     const { message, images } = messageWithImages(asObject(body));
     const handle = await openSession(sessionPath);
     await callClient(handle, () => handle.client.followUp(message, images));
+    recordEnqueue(handle, "followUp", message, images);
     json(res, 200, { ok: true });
+  });
+
+  /**
+   * Edit or remove one queued message.
+   *
+   * pi's queue has no per-item operations — the whole lane is opaque strings —
+   * so the server drains the lane, rewrites it, and pushes everything back
+   * (see `queue.ts`). `expectedText` guards against a client acting on a view
+   * that has already moved: on a mismatch pi's queue is restored untouched and
+   * the caller gets a conflict to re-render from.
+   */
+  route("POST", "/api/sessions/:id/queue/update", async ({ res, params, body }) => {
+    const sessionPath = allowedPath(params.id!);
+    const payload = asObject(body);
+    const mode = parseQueueMode(payload.mode);
+    const index = requireInt(payload, "index");
+    const expectedText = requireString(payload, "expectedText");
+    const actionBody = asObject(payload.action);
+    const action: QueueAction =
+      actionBody.kind === "edit"
+        ? { kind: "edit", text: requireString(actionBody, "text") }
+        : { kind: "remove" };
+    if (action.kind === "edit" && action.text.length === 0) {
+      throw badRequest("edited text must not be empty");
+    }
+    const handle = await openSession(sessionPath);
+    try {
+      const { queue, failed } = await callClient(handle, () =>
+        mutateQueue(handle, { mode, index, expectedText, action }),
+      );
+      json(res, 200, { ok: true, queue, failed });
+    } catch (err) {
+      if (err instanceof ConflictAfterRequeue) {
+        throw conflict(
+          err.failed.length > 0
+            ? `queue changed; ${err.failed.length} message(s) could not be restored`
+            : "queued item is no longer pending",
+        );
+      }
+      throw err;
+    }
   });
 
   route("POST", "/api/sessions/:id/abort", async ({ res, params }) => {
@@ -1755,6 +1874,44 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
     const handle = await openSession(sessionPath);
     const message = await callClient(handle, () => runBuiltinCommand(handle, name, args));
     json(res, 200, { ok: true, message });
+  });
+
+  /**
+   * Plan mode, as the running process holds it.
+   *
+   * The read-only sibling of the switch below, and it exists for the same
+   * reason: the session file lags the process (pi writes it lazily), so a `/plan`
+   * typed into a session that has not spoken yet is only in memory. A client
+   * that just sent that command asks here to learn what the log now holds,
+   * instead of waiting for some later composer read that would answer from a
+   * file with no entry in it.
+   */
+  route("GET", "/api/sessions/:id/plan", async ({ res, params }) => {
+    const sessionPath = allowedPath(params.id!);
+    const handle = await openSession(sessionPath);
+    json(res, 200, { planMode: await planModeNow(handle, sessionPath) });
+  });
+
+  /**
+   * Switch plan mode for a session.
+   *
+   * Plan mode belongs to a pi extension, so the switch is an extension command
+   * (`/plan` / `/plan off`), and it has to go through `prompt` because that is
+   * what expands extension commands. The browser could send the same text
+   * itself, but it would then have to pretend it had sent a user message pi
+   * never records; here the mode has one entry point, and the reply carries the
+   * state the session file now holds.
+   *
+   * `active` is required and explicit rather than a toggle, so a repeated
+   * request cannot flip the mode a second time.
+   */
+  route("POST", "/api/sessions/:id/plan", async ({ res, params, body }) => {
+    const sessionPath = allowedPath(params.id!);
+    const { active } = asObject(body);
+    if (typeof active !== "boolean") throw badRequest("active must be a boolean");
+    const handle = await openSession(sessionPath);
+    await callClient(handle, () => handle.client.prompt(active ? "/plan" : "/plan off"));
+    json(res, 200, { ok: true, planMode: await planModeNow(handle, sessionPath) });
   });
 
   /**

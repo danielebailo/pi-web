@@ -19,6 +19,7 @@ Start it with `npx pi-web-simple` — Node.js `>= 22.19.0`, bound to `127.0.0.1`
 - **Composition** — one idle-recycled pi process per session; an optional **minimal preset** at session creation (a one-line prompt and `bash` alone, still changeable from the header until the first turn lands).
 - **Input** — image input; `@` file mentions completed from `git ls-files`; `/` command completion; one card for the model and its thinking level; a context-usage reading beside it.
 - **Questions and plans** — `ask_user_question` carries a whole batch at once and answers it in one go; a timed-out batch can still be answered later; a question carrying an `intent` renders as an approval card for a plan.
+- **Plan mode** — the agent explores and designs before it acts, guided by a prompt section. `/plan` enters it; the chip that appears in the composer while it is on (or `/plan off`) leaves it. The finished plan is judged on the plan-review card, opens in the sidebar to be read at a column's width, and leaves a card at the turn's tail.
 - **Right sidebar** — file tree, preview, git changes (stage / commit / push / restore / switch branch), terminal, embedded browser; splits into two columns, with tabs draggable out into floating panels.
 - **Settings** — appearance and language, the model catalog (providers and entries, reasoning levels, context window, input types), plugins, MCP.
 - **Desktop app** — shares its data with the CLI; system notifications and a Dock / taskbar badge that opens the session.
@@ -124,8 +125,7 @@ All of it is currently written in Chinese.
 - [Desktop app](./docs/desktop.md) — the Electron shell: packaging, the bundled runtime, and what it still cannot do.
 - [Known limitations](./docs/known-limitations.md) — what it cannot do yet; worth a skim before installing.
 - [Environment variables](./docs/configuration.md) — all optional, with their defaults.
-- [Network and privacy](./docs/network-and-privacy.md) — whether it talks to the network, where data lives, and why it must not be exposed publicly.
-- [Security policy](./SECURITY.md) — how to report vulnerabilities, plus behaviour that is by design.
+- [Security policy](./SECURITY.md) — whether it talks to the network, where data lives, why it must not be exposed publicly, and how to report vulnerabilities.
 - [Contributing](./CONTRIBUTING.md) — setup, the four checks CI runs, and the code conventions.
 
 ## Friends

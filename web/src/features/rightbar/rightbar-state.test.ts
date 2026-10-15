@@ -1001,3 +1001,54 @@ describe("normalizeUrl", () => {
     expect(normalizeUrl("http://user:pass@example.com/")).toBeNull();
   });
 });
+
+describe("file references", () => {
+  it("keeps the lines a reference asked for on the tab", () => {
+    rightbarActions.openFileRef(KEY, "src/app.ts", { line: 24, endLine: 30 });
+    const tab = tabsOf(pane()).find((candidate) => candidate.kind === "preview");
+    expect(tab?.target).toBe("src/app.ts");
+    expect(tab?.line).toBe(24);
+    expect(tab?.endLine).toBe(30);
+  });
+
+  it("moves the open tab to the new lines instead of opening a second copy", () => {
+    rightbarActions.openFileRef(KEY, "src/app.ts", { line: 24 });
+    const first = ids();
+    rightbarActions.openFileRef(KEY, "src/app.ts", { line: 96, endLine: 100 });
+    expect(ids()).toEqual(first);
+    const tab = tabsOf(pane()).find((candidate) => candidate.kind === "preview");
+    expect(tab?.line).toBe(96);
+    expect(tab?.endLine).toBe(100);
+  });
+
+  it("clears the position when the file is opened without one", () => {
+    rightbarActions.openFileRef(KEY, "src/app.ts", { line: 24 });
+    rightbarActions.openFileRef(KEY, "src/app.ts");
+    const tab = tabsOf(pane()).find((candidate) => candidate.kind === "preview");
+    expect(tab?.line).toBeUndefined();
+    expect(tab?.endLine).toBeUndefined();
+  });
+
+  it("restores the position with the rest of the layout", () => {
+    installStorage();
+    rightbarActions.openFileRef(KEY, "src/app.ts", { line: 12, endLine: 14 });
+    // A fresh load of the same session, as a reload would do.
+    rightbarStore.set({ surfaces: {} });
+    rightbarActions.ensureSurface(KEY);
+    const tab = tabsOf(pane()).find((candidate) => candidate.kind === "preview");
+    expect(tab?.line).toBe(12);
+    expect(tab?.endLine).toBe(14);
+  });
+
+  it("drops a stored position that is not a usable range", () => {
+    const store = installStorage();
+    rightbarActions.openFileRef(KEY, "src/app.ts", { line: 12 });
+    const key = `${V2}${KEY}`;
+    const raw = store.get(key) ?? "";
+    store.set(key, raw.replace(/"line":12/, '"line":0'));
+    rightbarStore.set({ surfaces: {} });
+    rightbarActions.ensureSurface(KEY);
+    const tab = tabsOf(pane()).find((candidate) => candidate.kind === "preview");
+    expect(tab?.line).toBeUndefined();
+  });
+});

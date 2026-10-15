@@ -128,6 +128,27 @@ export const STATIC_DIR: string | null = (() => {
 })();
 
 /**
+ * Root of this package.
+ *
+ * Two levels up from both layouts this module is compiled into — `server/src/`
+ * under tsx, `server/build/` inside the published package — so one relative
+ * path answers for dev and for every published form. The root `package.json`
+ * (the single source of the version number) sits here.
+ */
+export const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+
+/**
+ * Running inside the desktop shell rather than under the published CLI.
+ *
+ * The shell has to say so because the install shape changes what "update"
+ * means: its copy of this code lives in the app bundle, not in an npm
+ * `node_modules`, so `npm install -g pi-web-simple` is neither how it moves
+ * forward nor something this page should offer to run. Set by
+ * `desktop/src/main.cts` when it spawns the server.
+ */
+export const DESKTOP = process.env.PI_WEB_SIMPLE_DESKTOP === "1";
+
+/**
  * Open the browser at the app URL once the server is listening.
  *
  * Only the published CLI opts in (it sets `PI_WEB_SIMPLE_OPEN=1`): the dev

@@ -1,4 +1,5 @@
 import { open, readdir, readFile, realpath, stat } from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
 import { basename, extname, join, sep } from "node:path";
 import { badRequest, forbidden, HttpError, notFound } from "./errors.ts";
 
@@ -85,8 +86,14 @@ export interface WorkspaceTextPage {
   offset: number;
   /** Byte offset the next page starts at; equals `size` at the end. */
   nextOffset: number;
-  /** Lines this page holds, so the caller can number the next page's first one. */
+  /** Lines a page holds, so the caller can number the next page's first one. */
   lines: number;
+  /**
+   * The file line this page's first line is, when the read was addressed by
+   * line (`fromLine`). Absent for an ordinary byte-offset walk, where the
+   * caller numbers pages itself from 1.
+   */
+  startLine?: number;
   text: string;
   size: number;
   /** True when this page reached the end of the file. */
@@ -483,6 +490,59 @@ function countLines(text: string): number {
 }
 
 /**
+ * How much lead-in a line-addressed read brings along.
+ *
+ * A jump is only useful if the reader can still scroll up from it: landing on
+ * line 4000 of a log with nothing above it makes the file appear to start there.
+ * Two hundred lines is a couple of screens beyond the target and, with the byte
+ * cap, still one page for any file a human reads.
+ */
+const TEXT_LEAD_LINES = 200;
+
+/**
+ * The byte offset where one line begins, found by scanning.
+ *
+ * This is exactly the cost that offset-addressed paging exists to avoid — it
+ * reads every byte before the line — and it is why it is paid only for the
+ * *first* page of a line-addressed read: the pages after that continue from a
+ * byte offset like any other walk. The scan is chunked so that landing in the
+ * middle of a gigabyte of log never materializes the file.
+ *
+ * @param handle - An open handle on the file.
+ * @param size - The file's size in bytes.
+ * @param line - The 1-based line to find.
+ * @returns That line's first byte, plus the line that actually landed there —
+ * the file's last one when it is shorter than the line asked for.
+ */
+async function lineStartOffset(
+  handle: FileHandle,
+  size: number,
+  line: number,
+): Promise<{ offset: number; line: number }> {
+  if (line <= 1) return { offset: 0, line: 1 };
+  const chunk = Buffer.alloc(TEXT_PAGE_BYTES);
+  let at = 0;
+  let seen = 1;
+  let start = 0;
+  while (at < size) {
+    const { bytesRead } = await handle.read(chunk, 0, Math.min(chunk.length, size - at), at);
+    if (bytesRead === 0) break;
+    const view = chunk.subarray(0, bytesRead);
+    let index = view.indexOf(NEWLINE);
+    while (index !== -1) {
+      seen += 1;
+      start = at + index + 1;
+      if (seen === line) return { offset: start, line };
+      index = view.indexOf(NEWLINE, index + 1);
+    }
+    at += bytesRead;
+  }
+  // Shorter than asked: the last line is the closest thing to the target, and it
+  // is a real line the caller can number.
+  return { offset: start, line: Math.min(line, seen) };
+}
+
+/**
  * Read one page of a text file, for files too large to hand over whole.
  *
  * The page is addressed by the byte offset the caller got back from the previous
@@ -490,11 +550,19 @@ function countLines(text: string): number {
  * anything the caller holds; it is clamped, and an offset at or past the end
  * answers with an empty final page rather than an error, because that is the
  * ordinary way a reader discovers it has reached the end.
+ *
+ * `fromLine` is the other way in, for a reader that wants one specific line
+ * rather than the head of the file — a reference in a message pointing at line
+ * 4000 of a log. It is answered by scanning once, here, so the client does not
+ * have to walk page by page to reach it; the page then carries `startLine` so
+ * the caller can number it without knowing what was skipped.
  */
 export async function readWorkspaceTextPage(
   root: string,
   relative: string,
   offset = 0,
+  /** The 1-based line to start from; only honoured for the first page. */
+  fromLine?: number,
 ): Promise<WorkspaceTextPage> {
   const { target, relative: normalized } = await resolveInsideProject(root, relative);
   const info = await stat(target);
@@ -502,11 +570,35 @@ export async function readWorkspaceTextPage(
   if (!info.isFile()) throw badRequest(`不是一个普通文件：${normalized}`);
 
   const name = basename(normalized);
-  const start = Number.isFinite(offset) ? Math.min(Math.max(0, Math.floor(offset)), info.size) : 0;
+  const askedLine =
+    fromLine !== undefined && Number.isFinite(fromLine) ? Math.floor(fromLine) : 0;
+  let start = Number.isFinite(offset) ? Math.min(Math.max(0, Math.floor(offset)), info.size) : 0;
   const base = { path: normalized, name, size: info.size };
 
+  let startLine: number | undefined;
+  // Only the first page can be line-addressed: a later one continues from a byte
+  // offset, which is what keeps the walk through a huge file linear.
+  if (askedLine > 1 && start === 0) {
+    const handle = await open(target, "r");
+    try {
+      const found = await lineStartOffset(handle, info.size, Math.max(1, askedLine - TEXT_LEAD_LINES));
+      start = Math.min(found.offset, info.size);
+      startLine = found.line;
+    } finally {
+      await handle.close();
+    }
+  }
+
   if (start >= info.size) {
-    return { ...base, offset: info.size, nextOffset: info.size, lines: 0, text: "", eof: true };
+    return {
+      ...base,
+      ...(startLine === undefined ? {} : { startLine }),
+      offset: info.size,
+      nextOffset: info.size,
+      lines: 0,
+      text: "",
+      eof: true,
+    };
   }
 
   const length = Math.min(TEXT_PAGE_BYTES, info.size - start);
@@ -530,6 +622,7 @@ export async function readWorkspaceTextPage(
   const nextOffset = start + end;
   return {
     ...base,
+    ...(startLine === undefined ? {} : { startLine }),
     offset: start,
     nextOffset,
     lines: countLines(text),
@@ -547,8 +640,29 @@ export async function readWorkspaceTextPage(
  * So this answers with the file's location and its type, and the route streams
  * the bytes.
  */
-const RAW_MIME: Record<string, string> = { pdf: "application/pdf" };
+const RAW_MIME: Record<string, string> = { pdf: "application/pdf", ...IMAGE_MIME };
 
+/**
+ * The cap `/raw` holds one format to.
+ *
+ * A PDF is its own budget because its viewer is a whole document; an image rides
+ * the same cap the base64 read does, so the two ways to look at one picture
+ * cannot disagree about which pictures are too big.
+ */
+function rawLimitFor(mimeType: string): number {
+  return mimeType === "application/pdf" ? PDF_LIMIT : IMAGE_LIMIT;
+}
+
+/**
+ * Hand over bytes the browser renders itself rather than this app.
+ *
+ * Two kinds of file belong here. A PDF has no renderer in this app at all, so
+ * the browser's viewer is the only one there is. An image has one — the Preview
+ * tab draws it from a base64 read — but a picture is also the one thing a
+ * reference wants to show *without* opening a tab, and `src` on an `<img>` is
+ * what lets that happen: cached, ranged, and decoded off the main thread instead
+ * of inflated into JSON.
+ */
 export async function readWorkspaceRaw(
   root: string,
   relative: string,
@@ -563,7 +677,7 @@ export async function readWorkspaceRaw(
   if (mimeType === undefined) {
     throw badRequest(`这种文件没有内置查看器：${name}`);
   }
-  if (info.size > PDF_LIMIT) {
+  if (info.size > rawLimitFor(mimeType)) {
     throw new HttpError(413, `文件过大（${formatSize(info.size)}），无法预览`);
   }
   return { name, mimeType, size: info.size, absolutePath: target };

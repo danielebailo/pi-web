@@ -1,9 +1,9 @@
 /**
- * Update notices: whether a newer pi is published, and which installed pi
- * packages are behind their upstream.
+ * Update notices: whether a newer pi is published, which installed pi packages
+ * are behind their upstream, and whether this project itself has moved on.
  *
- * Two different facts, resolved two different ways, because they are not the
- * same kind of thing.
+ * Three different facts, resolved three different ways, because they are not
+ * the same kind of thing.
  *
  * **pi itself** is an npm dependency of this server (`@earendil-works/pi-coding-agent`),
  * and what a newer release *is* is answered by pi's own release endpoint —
@@ -18,18 +18,29 @@
  * sources, missing installs — and honors `PI_OFFLINE`. That knowledge lives in
  * pi, not here, so it is called rather than reproduced.
  *
+ * **pi-web-simple itself** is what npm serves under the same name, so the npm
+ * registry answers it — there is no separate release endpoint of our own to
+ * defer to. Unlike the other two, this one can actually be carried out from
+ * here: the published forms all live in a `node_modules` that `npm install -g`
+ * (or `pi update`, for a pi install) replaces in place. The desktop shell is
+ * the exception — its copy sits inside the app bundle, so its row points at the
+ * release page instead of offering a button that could not do the job.
+ *
  * The check is cached in memory: opening the settings page should not spawn an
  * `npm view` per package every time, and pi itself polls at most once per start.
  * An explicit refresh (`force`) bypasses the cache.
  */
 
+import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join, sep } from "node:path";
 import {
   DefaultPackageManager,
   SettingsManager,
   VERSION,
   getAgentDir,
 } from "@earendil-works/pi-coding-agent";
-import { noProjectCwd } from "./config.ts";
+import { DESKTOP, PACKAGE_ROOT, noProjectCwd } from "./config.ts";
 
 /** pi's release endpoint, as used by the CLI's own startup check. */
 const LATEST_VERSION_URL = "https://pi.dev/api/latest-version";
@@ -65,6 +76,37 @@ export interface PiVersionInfo {
   skipped: boolean;
 }
 
+/**
+ * Whether a newer pi-web-simple is published.
+ *
+ * Same shape as `PiVersionInfo` on purpose — the page renders the two rows with
+ * one rule — except for the two fields that say *how* this copy moves on.
+ */
+export interface AppVersionInfo {
+  /**
+   * The version of the copy running right now, read from this package's own
+   * `package.json`. Null when that file cannot be read, which is the one case
+   * the page falls back to its build-time constant for.
+   */
+  current: string | null;
+  /** Newest version npm serves under the `latest` tag, or null. */
+  latest: string | null;
+  available: boolean;
+  /** Always `pi-web-simple`; named so the page need not hardcode it. */
+  packageName: string;
+  /**
+   * What moves this copy forward: a shell command, or the release page in the
+   * desktop shell (where no command of ours applies).
+   */
+  updateCommand: string;
+  /** False when this service cannot carry the update out; the row then only offers to copy. */
+  managed: boolean;
+  /** Why the check produced no answer — same rule as `PiVersionInfo.error`. */
+  error: string | null;
+  /** The check was deliberately skipped (`PI_OFFLINE` / `PI_SKIP_VERSION_CHECK`). */
+  skipped: boolean;
+}
+
 /** One installed package pi reports as behind its upstream. */
 export interface ExtensionUpdate {
   /** The source string as pi's settings record it; matches `ExtensionItem.source`. */
@@ -76,6 +118,8 @@ export interface ExtensionUpdate {
 
 export interface UpdatesView {
   pi: PiVersionInfo;
+  /** Whether pi-web-simple itself is behind the npm registry. */
+  app: AppVersionInfo;
   /** Packages with an available update; empty when there are none. */
   extensions: ExtensionUpdate[];
   /** Why the package check produced no list. Same rule as `pi.error`. */
@@ -103,7 +147,12 @@ export interface UpdatesDeps {
   fetchImpl?: typeof fetch;
   /** Defaults to pi's own package manager; tests replace the network side. */
   packageManager?: (projectPath: string | null) => PackageUpdateSource;
+  /** Defaults to a real `spawn`; tests replace it so nothing is installed. */
+  runCommand?: CommandRunner;
 }
+
+/** Runs an argv and resolves on exit code 0. Never goes through a shell. */
+export type CommandRunner = (argv: string[]) => Promise<void>;
 
 export class UpdatesConfigError extends Error {
   constructor(message: string) {
@@ -286,6 +335,183 @@ async function readPiVersion(deps: UpdatesDeps): Promise<PiVersionInfo> {
   }
 }
 
+// --- this project's own release ----------------------------------------------
+
+/** The npm package this repository publishes; the check and the command share it. */
+const APP_PACKAGE = "pi-web-simple";
+
+/** npm's per-package endpoint: `latest` is what a bare `npm install` resolves to. */
+const APP_REGISTRY_URL = `https://registry.npmjs.org/${APP_PACKAGE}/latest`;
+
+/** Where the desktop shell's users actually get a new version. */
+const APP_RELEASES_URL = "https://github.com/woxihejinghao/pi-web/releases/latest";
+
+/**
+ * npm has to resolve a dependency tree and download it, which is minutes on a
+ * slow link — the check's 10-second budget would turn a working update into a
+ * timeout half the time.
+ */
+const APP_UPDATE_TIMEOUT_MS = 5 * 60 * 1000;
+
+/** How much of a failed command's output to keep for the error message. */
+const APP_UPDATE_LOG_TAIL_CHARS = 4000;
+
+/**
+ * The version of the copy running right now.
+ *
+ * Read from disk rather than baked in at build time because it has to be able
+ * to change while the process lives: an in-place update rewrites this file, and
+ * the read right after `updateApp` reports the new number without a restart —
+ * which is the honest answer, even though the code already in memory is still
+ * the old one. (The page says so.)
+ */
+function readOwnVersion(): string | null {
+  try {
+    const parsed = JSON.parse(readFileSync(join(PACKAGE_ROOT, "package.json"), "utf8")) as {
+      version?: unknown;
+    };
+    const version = parsed.version;
+    return typeof version === "string" && version.length > 0 ? version : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A command as the page shows it and as `spawn` runs it. */
+interface AppUpdatePlan {
+  /** The one that is actually executed; there is no shell to interpolate into. */
+  argv: string[];
+  /** The same command as text, for the button's tooltip and the copy fallback. */
+  command: string;
+}
+
+/**
+ * How this copy of pi-web-simple is updated.
+ *
+ * Decided by where the code is running from, not by asking: a pi install sits
+ * under pi's own package directory, and `pi update` owns that copy. Everything
+ * else — `npm install -g`, and the npx cache — goes through npm. The desktop
+ * shell is neither, and never reaches here (its row is unmanaged).
+ */
+function appUpdatePlan(): AppUpdatePlan {
+  const piPackages = `${join(getAgentDir(), "npm")}${sep}`;
+  if (`${PACKAGE_ROOT}${sep}`.startsWith(piPackages)) {
+    const argv = ["pi", "update", `npm:${APP_PACKAGE}`];
+    return { argv, command: argv.join(" ") };
+  }
+  const argv = ["npm", "install", "-g", `${APP_PACKAGE}@latest`];
+  return { argv, command: argv.join(" ") };
+}
+
+/**
+ * Run an update command to completion.
+ *
+ * `spawn` with no shell on POSIX; on Windows npm and pi are `.cmd` shims that
+ * Node refuses to spawn directly, so that platform gets a shell — safe here
+ * because every argument is a literal written above, never user input.
+ */
+async function runCommandForReal(argv: string[]): Promise<void> {
+  const [command, ...args] = argv;
+  await new Promise<void>((resolveRun, rejectRun) => {
+    const child = spawn(command!, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+      shell: process.platform === "win32",
+    });
+    let tail = "";
+    const collect = (chunk: unknown): void => {
+      tail = `${tail}${String(chunk)}`.slice(-APP_UPDATE_LOG_TAIL_CHARS);
+    };
+    child.stdout?.on("data", collect);
+    child.stderr?.on("data", collect);
+
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      rejectRun(new Error(`超过 ${APP_UPDATE_TIMEOUT_MS / 60_000} 分钟仍未结束`));
+    }, APP_UPDATE_TIMEOUT_MS);
+
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      rejectRun(new Error(`${command} 无法启动：${error.message}`));
+    });
+    child.once("close", (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolveRun();
+      else {
+        const output = tail.trim();
+        rejectRun(new Error(`退出码 ${code}${output.length > 0 ? `：\n${output}` : ""}`));
+      }
+    });
+  });
+}
+
+/** Ask npm for the version behind the `latest` tag. Null when there is none. */
+async function fetchLatestAppVersion(
+  current: string,
+  fetchImpl: typeof fetch,
+): Promise<string | null> {
+  const response = await fetchImpl(APP_REGISTRY_URL, {
+    headers: { "User-Agent": `${APP_PACKAGE}/${current}`, accept: "application/json" },
+    signal: AbortSignal.timeout(VERSION_CHECK_TIMEOUT_MS),
+  });
+  if (!response.ok) return null;
+  const data = (await response.json()) as Record<string, unknown>;
+  const version = typeof data.version === "string" ? data.version.trim() : "";
+  return version.length > 0 ? version : null;
+}
+
+/** Resolve this project's version notice. Never throws; failures land in `error`. */
+async function readAppVersion(deps: UpdatesDeps): Promise<AppVersionInfo> {
+  const current = readOwnVersion();
+  const base: Omit<AppVersionInfo, "latest" | "available" | "error" | "skipped"> = {
+    current,
+    packageName: APP_PACKAGE,
+    updateCommand: DESKTOP ? APP_RELEASES_URL : appUpdatePlan().command,
+    managed: !DESKTOP,
+  };
+
+  if (versionCheckSkipped()) {
+    return { ...base, latest: null, available: false, error: null, skipped: true };
+  }
+  if (current === null) {
+    return {
+      ...base,
+      latest: null,
+      available: false,
+      error: "读不到 package.json，无法确定当前版本。",
+      skipped: false,
+    };
+  }
+
+  try {
+    const latest = await fetchLatestAppVersion(current, deps.fetchImpl ?? fetch);
+    if (latest === null) {
+      return {
+        ...base,
+        latest: null,
+        available: false,
+        error: `npm registry 没有返回 ${APP_PACKAGE} 的版本号。`,
+        skipped: false,
+      };
+    }
+    return {
+      ...base,
+      latest,
+      available: isNewerVersion(latest, current),
+      error: null,
+      skipped: false,
+    };
+  } catch (err) {
+    return {
+      ...base,
+      latest: null,
+      available: false,
+      error: describeFetchError(err),
+      skipped: false,
+    };
+  }
+}
+
 // --- installed package updates ----------------------------------------------
 
 /**
@@ -351,12 +577,14 @@ export async function readUpdates(
   }
 
   const deps = options.deps ?? {};
-  const [pi, extensions] = await Promise.all([
+  const [pi, app, extensions] = await Promise.all([
     readPiVersion(deps),
+    readAppVersion(deps),
     readExtensionUpdates(projectPath, deps),
   ]);
   const value: UpdatesView = {
     pi,
+    app,
     extensions: extensions.items,
     extensionsError: extensions.error,
     checkedAt: now,
@@ -384,6 +612,38 @@ export async function updateExtension(
     await packages.update(source);
   } catch (err) {
     throw new UpdatesConfigError(`更新 ${source} 失败：${(err as Error).message}`);
+  }
+  clearUpdateCache();
+  return await readUpdates(projectPath, { force: true, deps });
+}
+
+/**
+ * Move this copy of pi-web-simple to the version npm calls latest.
+ *
+ * The one update in this module that changes the running program itself, which
+ * is what makes it safe to offer: npm replaces files in a `node_modules` that a
+ * restart will read fresh, so nothing here edits code in place. The answer the
+ * cache held is stale by construction once the command returns, and the read
+ * afterwards compares the *new* on-disk version against the registry — which is
+ * why the page can report both "updated to X" and "restart to use it".
+ *
+ * The desktop shell refuses: its bundle is not in any `node_modules` this could
+ * reach, and pretending otherwise would produce a success message for an
+ * install that changed nothing the user is running.
+ */
+export async function updateApp(
+  projectPath: string | null,
+  options: { deps?: UpdatesDeps } = {},
+): Promise<UpdatesView> {
+  const deps = options.deps ?? {};
+  if (DESKTOP) {
+    throw new UpdatesConfigError("桌面版请从 GitHub Releases 下载新版本安装包，这里不代劳。");
+  }
+  const { argv } = appUpdatePlan();
+  try {
+    await (deps.runCommand ?? runCommandForReal)(argv);
+  } catch (err) {
+    throw new UpdatesConfigError(`更新 ${APP_PACKAGE} 失败：${(err as Error).message}`);
   }
   clearUpdateCache();
   return await readUpdates(projectPath, { force: true, deps });

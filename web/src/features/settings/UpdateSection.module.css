@@ -1,6 +1,6 @@
 /*
- * The right-hand control for the pi-version row (项目版本 has no control —
- * just the number, which reuses `.version` below).
+ * The right-hand control shared by both version rows — 项目版本 used to be a
+ * bare number, so the rule it needed then ("no control") is gone.
  *
  * It wraps rather than squeezing: the version, its status, and two buttons do
  * not fit beside the description on a narrow window, and a wrapped button is
@@ -36,7 +36,11 @@
   color: var(--dsw-alias-state-error-primary);
 }
 
-/* The section's primary action: copying the command is the next step. */
+/*
+ * The primary action of a row: an update available is the one thing on this
+ * page worth leaving with. Two rows use it — 复制更新命令 for pi (the command
+ * is the whole next step) and 立即更新 for this project (the button does it).
+ */
 .action {
   box-sizing: border-box;
   height: 28px;

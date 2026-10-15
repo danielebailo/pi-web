@@ -257,6 +257,17 @@ describe("pending prompts", () => {
     });
   });
 
+  it("carries the command flag across the queue", () => {
+    // pi records only what an extension command submits itself, so a queued
+    // command has to arrive as one — otherwise the session draws the typed line
+    // as a user turn nothing ever wrote.
+    actions.queuePendingPrompt(REAL_PATH, "/plan", "prompt", [], true);
+    expect(actions.takePendingPrompt(REAL_PATH)).toMatchObject({ text: "/plan", command: true });
+
+    actions.queuePendingPrompt(REAL_PATH, "hello", "prompt");
+    expect(actions.takePendingPrompt(REAL_PATH)?.command).toBeUndefined();
+  });
+
   it("consumes the prompt only once", () => {
     actions.queuePendingPrompt(REAL_PATH, "hello", "prompt");
     expect(actions.takePendingPrompt(REAL_PATH)).not.toBeNull();

@@ -1,0 +1,148 @@
+/*
+ * The plan-review card's own chrome.
+ *
+ * It takes over the composer seat the way the question card does and reuses
+ * that card's shell (`QuestionCard.module.css`), but it draws none of the ask
+ * card's parts: no eyebrow, no pager, no skip, no submit. A submitted plan is
+ * one decision with two verdicts, and every one of those controls would be
+ * either meaningless here or a second way to answer the same thing — which is
+ * why dsh gives the review a card of its own instead of a question to fill in.
+ */
+
+/*
+ * The full-width band where the ask card puts its title row. Tinted, because
+ * the card is waiting on the user: the same thing the run-state dot says.
+ */
+.strip {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--dsw-alias-state-warn-tertiary);
+  color: var(--dsw-alias-state-warn-primary);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.stripLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * dsh's `reviewLink`: the way into the document sits at the far end of the
+ * band, away from the verdicts the footer holds, because reading the plan and
+ * judging it are different acts.
+ */
+.stripActions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.open {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.open:hover {
+  text-decoration: underline;
+}
+
+/* dsh's chevron points right; this project's icon set has the disclosure one. */
+.openChevron {
+  transform: rotate(-90deg);
+}
+
+/*
+ * The session line sits above the card but on the card's own axis: it describes
+ * the request, not the document being reviewed. 780px is the card shell's own
+ * width (`QuestionCard.module.css`), repeated here because this line lives
+ * outside that shell.
+ */
+.eyebrow {
+  max-width: 780px;
+  margin: 0 auto 4px;
+  padding: 0 2px;
+}
+
+.summary {
+  min-width: 0;
+  padding: 14px 16px 12px;
+}
+
+/* The plan's own first line, at the weight of a card title. It is an `h3`
+ * rather than the ask card's `h2`: this is a decision about a document, not a
+ * question the user was asked. */
+.title {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 500;
+}
+
+/* Two lines at a column's width, then the rest is the sidebar's job. */
+.description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  margin: 8px 0 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+/* The field carries its own 6px margin, so 10px here lands on the summary's
+ * 16px text edge. */
+.changes {
+  padding: 0 10px;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 12px;
+  padding: 10px 16px 12px;
+}
+
+.feedback {
+  flex: 1;
+  min-width: 0;
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 11px;
+  line-height: 16px;
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+/*
+ * Inside a strip the card keeps its own page insets off: the strip already
+ * inset it from the column, and stacking both makes the card look narrower
+ * than the strip it belongs to.
+ */
+.embeddedWrap {
+  padding: 0;
+}

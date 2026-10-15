@@ -1,4 +1,4 @@
-import type { ExtensionUpdate, PiVersionInfo, UpdatesView } from "./types.ts";
+import type { ExtensionUpdate, UpdatesView } from "./types.ts";
 import type { Translate } from "./i18n/index.ts";
 
 /**
@@ -34,22 +34,33 @@ export function extensionUpdateCount(view: UpdatesView | null): number {
 }
 
 /**
- * True when anything is behind: pi itself or one of its packages. This is the
- * sidebar badge's question — it should appear for either reason.
+ * True when anything is behind: pi itself, this project, or one of its packages.
+ * This is the sidebar badge's question — it should appear for any reason, since
+ * all three mean "there is something here to update".
  */
 export function hasAnyUpdate(view: UpdatesView | null): boolean {
   if (view === null) return false;
-  return view.pi.available || view.extensions.length > 0;
+  return view.pi.available || view.app.available || view.extensions.length > 0;
+}
+
+/** The minimum a version notice must carry to use the shared wording below. */
+export interface VersionNotice {
+  latest: string | null;
+  available: boolean;
+  error: string | null;
+  skipped: boolean;
 }
 
 /**
- * The pi row's status.
+ * One version row's status.
  *
- * The order matters: a skipped or failed check must not fall through to "已是最新",
+ * Shared by the pi row and the 项目版本 row because the answer is the same shape
+ * and the rule about what is *not* said is the whole point of it. The order
+ * matters: a skipped or failed check must not fall through to "已是最新",
  * because that string is a claim about the world and these states do not know
  * it. `null` means the answer has not arrived yet.
  */
-export function piVersionStatus(info: PiVersionInfo | null, t: Translate): string {
+export function versionStatus(info: VersionNotice | null, t: Translate): string {
   if (info === null) return t("updates.checking");
   if (info.skipped) return t("updates.skipped");
   if (info.error !== null) return t("updates.failed");

@@ -152,15 +152,8 @@ Windows 与 Linux 期望满幅方形（圆角交给系统或桌面环境）。�
 
 ## 环境变量与排错
 
-桌面版继承启动它的那份环境，其他变量与 CLI 版一致，见[环境变量](./configuration.md)。
-注意 macOS/Linux 的图形界面启动**拿不到你 shell 里的环境**，要让桌面上双击的应用认
-某个变量，得这样启动：
-
-```sh
-PI_WEB_SIMPLE_HOME=/tmp/piws /Applications/pi-web-simple.app/Contents/MacOS/pi-web-simple
-# 或者让 launchd 记住它，再正常双击
-launchctl setenv PI_WEB_SIMPLE_HOME /tmp/piws
-```
+桌面版继承启动它的那份环境，变量与 CLI 版完全一致（含桌面版自己写好的那三个），
+全部见[环境变量](./configuration.md#桌面版)。这里只讲怎么排查它没起来或没退干净。
 
 服务端的输出会打到应用的 stderr；从终端启动就能看到：
 
@@ -184,7 +177,7 @@ Node，默认用宿主 PATH 上的 `node`。
 
 ## 已知限制
 
-- **没有自动更新**：升级＝重新下载安装包。签名和更新通道都还没有。
+- **没有自动更新**：升级＝重新下载安装包。签名和更新通道都还没有。但「关于」里的项目版本行**会检查** npm 上的新版本（这一份同样会落后），落后时给的是一枚「复制下载地址」而不是一键更新——桌面版这份代码在 app bundle 里，`npm install -g` 更新的是另一个东西。
 - **Intel 版 macOS 包要在 Intel 上构建**：自带运行时按宿主平台选，所以矩阵里那条
   `macos-15-intel` 标了 `experimental`——runner 一旦被 GitHub 下线，它不会挡住其他平台的发布。
 - **Windows 上没有 SIGTERM**：退出时服务端是被直接终止的，它来不及回收自己下面的 pi

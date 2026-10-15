@@ -70,7 +70,14 @@ function normalizeRelative(path: string): string {
   return path.replace(/^\.\//, "");
 }
 
-function relativeToProject(path: string, cwd: string | undefined): string | null {
+/**
+ * A tool-supplied path as this project names it, or null when it is outside.
+ *
+ * Also used by `turn-refs.ts`: a turn's vocabulary of files has to spell a path
+ * the same way the prose it is matched against does, and both sides get that
+ * spelling from here.
+ */
+export function relativeToProject(path: string, cwd: string | undefined): string | null {
   if (!isAbsolutePath(path)) return normalizeRelative(path);
   if (cwd === undefined || cwd === "") return null;
   const root = cwd.replace(/[/\\]+$/, "");

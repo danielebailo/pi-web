@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { VERSION } from "@earendil-works/pi-coding-agent";
 import {
   UpdatesConfigError,
@@ -6,15 +6,17 @@ import {
   compareVersions,
   isNewerVersion,
   readUpdates,
+  updateApp,
   updateExtension,
   type PackageUpdateSource,
 } from "./updates.ts";
 
 /**
  * Both sides of this module leave the process, so both are injected: `fetch`
- * for pi's release endpoint, and pi's package manager for the installed-package
- * check. Without that the suite would depend on the network and on npm being
- * able to spawn, which is exactly the flakiness the seam exists to avoid.
+ * for the two endpoints (pi's release endpoint, and the npm registry for this
+ * project), and pi's package manager for the installed-package check. Without
+ * that the suite would depend on the network and on npm being able to spawn,
+ * which is exactly the flakiness the seam exists to avoid.
  */
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -24,19 +26,26 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+const PI_RELEASE_URL = "https://pi.dev/api/latest-version";
+const APP_REGISTRY_URL = "https://registry.npmjs.org/pi-web-simple/latest";
+
 function fetchStub(
   release: unknown,
-  options: { status?: number; fail?: boolean } = {},
+  options: { status?: number; fail?: boolean; app?: unknown } = {},
 ): { impl: typeof fetch; calls: string[] } {
   const calls: string[] = [];
   const impl = (async (input: unknown) => {
-    calls.push(String(input));
+    const url = String(input);
+    calls.push(url);
     if (options.fail === true) {
       throw new TypeError("fetch failed", {
         cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }),
       });
     }
-    return jsonResponse(release, options.status ?? 200);
+    // The registry default is a version nobody can beat, so tests that are
+    // about pi do not have to spell out "and the project is current".
+    const body = url === APP_REGISTRY_URL ? (options.app ?? { version: "0.0.0" }) : release;
+    return jsonResponse(body, options.status ?? 200);
   }) as unknown as typeof fetch;
   return { impl, calls };
 }
@@ -119,7 +128,7 @@ describe("readUpdates", () => {
       deps: { fetchImpl: fetch.impl, packageManager: () => packages },
     });
 
-    expect(fetch.calls).toEqual(["https://pi.dev/api/latest-version"]);
+    expect([...fetch.calls].sort()).toEqual([PI_RELEASE_URL, APP_REGISTRY_URL]);
     expect(view.pi.current).toBe(VERSION);
     expect(view.pi.latest).toBe("99.0.0");
     expect(view.pi.available).toBe(true);
@@ -182,6 +191,10 @@ describe("readUpdates", () => {
     expect(fetch.calls).toEqual([]);
     expect(view.pi.skipped).toBe(true);
     expect(view.pi.error).toBeNull();
+    // The project's own check respects the same two switches, so one offline
+    // answer covers both rows instead of one of them phoning home anyway.
+    expect(view.app.skipped).toBe(true);
+    expect(view.app.error).toBeNull();
   });
 
   it("reuses a cached answer until it is forced", async () => {
@@ -190,10 +203,10 @@ describe("readUpdates", () => {
 
     await readUpdates(null, { deps });
     await readUpdates(null, { deps });
-    expect(fetch.calls).toHaveLength(1);
+    expect(fetch.calls).toHaveLength(2);
 
     await readUpdates(null, { deps, force: true });
-    expect(fetch.calls).toHaveLength(2);
+    expect(fetch.calls).toHaveLength(4);
   });
 });
 
@@ -223,5 +236,87 @@ describe("updateExtension", () => {
     await expect(
       updateExtension(null, "npm:gone", { deps: { packageManager: () => broken } }),
     ).rejects.toBeInstanceOf(UpdatesConfigError);
+  });
+});
+
+describe("this project's own release", () => {
+  it("reports the newer version npm serves under the latest tag", async () => {
+    const fetch = fetchStub({ ok: true, version: VERSION }, { app: { version: "99.0.0" } });
+    const view = await readUpdates(null, {
+      deps: { fetchImpl: fetch.impl, packageManager: () => packageStub([]) },
+    });
+
+    expect(view.app.packageName).toBe("pi-web-simple");
+    // Read from this checkout's own package.json, so it is the real number.
+    expect(view.app.current).toMatch(/^\d+\.\d+\.\d+/);
+    expect(view.app.latest).toBe("99.0.0");
+    expect(view.app.available).toBe(true);
+    expect(view.app.error).toBeNull();
+    expect(view.app.skipped).toBe(false);
+    // The published CLI and the npx cache can both be moved by npm.
+    expect(view.app.managed).toBe(true);
+    expect(view.app.updateCommand).toContain("pi-web-simple");
+  });
+
+  it("keeps a registry with nothing to say apart from 'up to date'", async () => {
+    const fetch = fetchStub({ ok: true, version: VERSION }, { app: {} });
+    const view = await readUpdates(null, {
+      deps: { fetchImpl: fetch.impl, packageManager: () => packageStub([]) },
+    });
+
+    expect(view.app.available).toBe(false);
+    expect(view.app.latest).toBeNull();
+    expect(view.app.error).toContain("pi-web-simple");
+  });
+});
+
+describe("updateApp", () => {
+  it("runs the install command, then answers from a freshly resolved check", async () => {
+    const fetch = fetchStub({ ok: true, version: VERSION }, { app: { version: "99.0.0" } });
+    const runs: string[][] = [];
+
+    const view = await updateApp(null, {
+      deps: {
+        fetchImpl: fetch.impl,
+        packageManager: () => packageStub([]),
+        runCommand: async (argv) => {
+          runs.push(argv);
+        },
+      },
+    });
+
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.[0]).toBe("npm");
+    expect(runs[0]).toContain("pi-web-simple@latest");
+    // The cache was dropped, so this is the registry's answer again rather
+    // than the one from before the command ran.
+    expect(view.app.latest).toBe("99.0.0");
+    expect(view.app.available).toBe(true);
+  });
+
+  it("wraps a failing command in the config error the route maps", async () => {
+    await expect(
+      updateApp(null, {
+        deps: {
+          runCommand: async () => {
+            throw new Error("EACCES: permission denied");
+          },
+        },
+      }),
+    ).rejects.toBeInstanceOf(UpdatesConfigError);
+  });
+
+  it("refuses in the desktop shell, whose copy lives in an app bundle", async () => {
+    vi.stubEnv("PI_WEB_SIMPLE_DESKTOP", "1");
+    vi.resetModules();
+    try {
+      // Re-imported because the switch is read once, at module load.
+      const fresh = await import("./updates.ts");
+      await expect(fresh.updateApp(null)).rejects.toBeInstanceOf(fresh.UpdatesConfigError);
+      fresh.clearUpdateCache();
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
   });
 });

@@ -51,6 +51,7 @@ export type RightbarTabKind =
   | "preview"
   | "changes"
   | "changes-review"
+  | "plan"
   | "browser"
   | "terminal";
 
@@ -61,7 +62,8 @@ export interface RightbarTab {
   /**
    * What the tab is about: a project-relative path for `preview`, an HTTP(S)
    * URL for `browser`, the host's own id for `terminal`, `<turn>#<index>` for
-   * `changes-review`, and nothing for `files` or `changes` (neither needs an
+   * `changes-review`, a plan's tool-call id (or `review:<key>` for an unlogged
+   * one) for `plan`, and nothing for `files` or `changes` (neither needs an
    * address).
    */
   target: string;
@@ -69,6 +71,18 @@ export interface RightbarTab {
   history?: string[];
   /** `browser` only: the position inside that history. */
   historyIndex?: number;
+  /**
+   * `preview` only: the line a reference asked for, kept on the tab.
+   *
+   * A tab is addressed by its file, not by its position — clicking a line in
+   * another message brings the open tab to that line rather than stacking a
+   * second copy of the same file (the rule `openPreviewTab` states). The
+   * position therefore lives here, where the body can re-read it, instead of
+   * being handed to the body once as a prop that a later click would miss.
+   */
+  line?: number;
+  /** `preview` only: the last line of a range; equal to `line` for one line. */
+  endLine?: number;
 }
 
 /** Where a pane is drawn: inside the docked row, or as a viewport overlay. */
@@ -205,6 +219,21 @@ export function clampWidth(width: number): number {
 }
 
 /**
+ * The lines a preview tab was left on, read back only when they form a range.
+ *
+ * A stored line is a hint rather than data: a tab that comes back without one is
+ * an ordinary preview. A pair that came back broken is dropped whole — a target
+ * the body cannot scroll to is worse than no target, because the chip would
+ * appear to have been followed and nothing would move.
+ */
+function readPosition(tab: Record<string, unknown>): Pick<RightbarTab, "line" | "endLine"> {
+  const { line, endLine } = tab;
+  if (typeof line !== "number" || !Number.isSafeInteger(line) || line < 1) return {};
+  if (typeof endLine !== "number" || !Number.isSafeInteger(endLine) || endLine < line) return { line };
+  return { line, endLine };
+}
+
+/**
  * A tab record read back from storage, or null when it is not one.
  *
  * "diff" was this tab's kind before it grew staging, committing and history; a
@@ -235,6 +264,7 @@ function readTab(entry: unknown): RightbarTab | null {
     kind,
     title: tab.title,
     target,
+    ...(kind === "preview" ? readPosition(tab) : {}),
     ...(kind === "browser" && Array.isArray(tab.history)
       ? { history: tab.history.filter((item): item is string => typeof item === "string") }
       : {}),
@@ -520,8 +550,10 @@ const TAB_TITLE_KEYS = {
   changes: "tab.changes",
   browser: "tab.browser",
   terminal: "tab.terminal",
-  // Only the fallback: a review tab that parses is titled after its turn.
+  // Only the fallback: a review tab that parses is titled after its turn, and a
+  // plan tab is titled after the plan it shows.
   "changes-review": "tab.changesReview",
+  plan: "tab.plan",
 } as const;
 
 /**
@@ -542,6 +574,10 @@ export function tabTitle(tab: RightbarTab, t: Translate): string {
     const turn = parseTurnChangesTarget(tab.target)?.turn;
     return turn === undefined ? t("tab.changesReview") : t("turnChanges.title", { turn });
   }
+  // A plan tab is titled after the plan itself, which is the heading the card
+  // that opened it showed; the fallback is only for a tab whose document has
+  // not been read yet.
+  if (tab.kind === "plan" && tab.title.length > 0) return tab.title;
   return t(TAB_TITLE_KEYS[tab.kind]);
 }
 
@@ -563,9 +599,19 @@ export function makeFilesTab(): RightbarTab {
   return { id: nextTabId("files"), kind: "files", title: "", target: "" };
 }
 
-export function makePreviewTab(path: string): RightbarTab {
+export function makePreviewTab(
+  path: string,
+  position: { line?: number | undefined; endLine?: number | undefined } = {},
+): RightbarTab {
   const title = path.split("/").pop() ?? path;
-  return { id: nextTabId("preview"), kind: "preview", title, target: path };
+  return {
+    id: nextTabId("preview"),
+    kind: "preview",
+    title,
+    target: path,
+    ...(position.line === undefined ? {} : { line: position.line }),
+    ...(position.endLine === undefined ? {} : { endLine: position.endLine }),
+  };
 }
 
 export function makeChangesTab(): RightbarTab {
@@ -603,6 +649,27 @@ export function makeTurnChangesTab(turn: number, index: number): RightbarTab {
     title: "",
     target: turnChangesTarget(turn, index),
   };
+}
+
+/**
+ * The prefix that names an unlogged plan inside a plan tab's target.
+ *
+ * A review that carries no `callId` has no tool invocation to reopen, so its
+ * document exists only in memory (`plan-store.ts`) and the address has to say
+ * which kind it is. dsh splits the same case into two resource schemes
+ * (`plan/` and `plan-review/`) for the same reason.
+ */
+export const REVIEW_TARGET_PREFIX = "review:";
+
+/**
+ * A plan tab, addressed by the plan it shows.
+ *
+ * The title is the plan's own first heading, so the strip reads like the card
+ * that opened it; the body re-reads the document from the projection, which is
+ * what makes a restored tab work once its session is open again.
+ */
+export function makePlanTab(target: string, title: string): RightbarTab {
+  return { id: nextTabId("plan"), kind: "plan", title, target };
 }
 
 export function makeBrowserTab(url: string): RightbarTab {
@@ -946,6 +1013,8 @@ function revealOrOpen(
   match: (tab: RightbarTab) => boolean,
   make: () => RightbarTab,
   paneId?: string,
+  /** Fields to write onto the tab that is already open; see `openPreviewTab`. */
+  patch?: Partial<RightbarTab>,
 ): void {
   const surface = surfaceOf(rightbarStore.get(), key);
   const existing = Object.values(surface.tabs).find(match);
@@ -953,7 +1022,16 @@ function revealOrOpen(
     rightbarActions.openTab(key, make(), paneId);
     return;
   }
-  const next = surfaceShowing(surface, existing.id);
+  // A tab that is already open is the same tab, so an incoming position is
+  // written onto it. Without this a second reference to a file could only
+  // either be ignored (the reader sees nothing happen) or be stacked as a
+  // duplicate (the strip grows a copy per line) — dsh applies the incoming
+  // file index to the open tab for the same reason.
+  const tabs =
+    patch === undefined
+      ? surface.tabs
+      : { ...surface.tabs, [existing.id]: { ...existing, ...patch } };
+  const next = surfaceShowing({ ...surface, tabs }, existing.id);
   if (next === null) return;
   // One commit, not two: asking for a file both shows its tab and opens the
   // panel, and a gesture writes the layout once.
@@ -1153,19 +1231,65 @@ export const rightbarActions = {
   },
 
   /**
+   * Focus the plan tab for one document, creating it when this surface has none.
+   *
+   * One tab per plan, keyed by its address — the same rule the preview tab uses
+   * for files, and dsh's for resources: reopening a plan focuses the tab already
+   * showing it instead of stacking a second copy. The transcript card, the
+   * review's own link and a restored layout all come through here, so none of
+   * them can disagree about what "the plan's tab" is.
+   */
+  openPlanTab(key: string, target: string, title: string, paneId?: string): void {
+    revealOrOpen(
+      key,
+      (tab) => tab.kind === "plan" && tab.target === target,
+      () => makePlanTab(target, title),
+      paneId,
+    );
+  },
+
+  /**
    * Focus the Preview tab for one file, creating it when this surface has none.
    *
    * Two files are two tabs, and asking for one that is already open focuses it
    * rather than opening a second copy — the address is the tab's identity, the
    * same rule dsh's document preview uses.
+   *
+   * `position` is where a *reference* asked to land, and it is written onto the
+   * tab whichever branch ran: a preview that was already open moves to the line
+   * the reference named instead of staying where the reader left it. Passing no
+   * position clears it, so clicking the file by name after clicking a line in it
+   * shows the file from the top rather than snapping back to the old line.
    */
-  openPreviewTab(key: string, path: string, paneId?: string): void {
+  openPreviewTab(
+    key: string,
+    path: string,
+    paneId?: string,
+    position: { line?: number | undefined; endLine?: number | undefined } = {},
+  ): void {
     revealOrOpen(
       key,
       (tab) => tab.kind === "preview" && tab.target === path,
-      () => makePreviewTab(path),
+      () => makePreviewTab(path, position),
       paneId,
+      { line: position.line, endLine: position.endLine },
     );
+  },
+
+  /**
+   * Open a file a message points at.
+   *
+   * The transcript addresses one thing — the file and the lines — and knows nothing
+   * about panes, so this is `openPreviewTab` without the pane argument that only a
+   * pane's own controls have. The panel opens itself if it was closed, which is what
+   * makes a chip click always land somewhere visible.
+   */
+  openFileRef(
+    key: string,
+    path: string,
+    position: { line?: number | undefined; endLine?: number | undefined } = {},
+  ): void {
+    rightbarActions.openPreviewTab(key, path, undefined, position);
   },
 
   openBrowserTab(key: string, url: string, paneId?: string): void {

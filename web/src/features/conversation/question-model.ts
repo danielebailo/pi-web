@@ -227,3 +227,44 @@ export function askUserAnswerPayload(
   });
   return { answers };
 }
+
+/**
+ * What a sidebar row should say about a dialog blocking one session.
+ *
+ * Two kinds of block exist, and they are worth telling apart in a list: an
+ * ordinary question ("waiting for your answer") and a plan submitted for
+ * approval. dsh draws the second one as its own row state — `Plan awaiting
+ * review`, with the row's timestamp replaced by `Plan review` — because a plan
+ * review is the one block whose answer is a document rather than a click.
+ */
+export type PendingAsk = "question" | "plan-review";
+
+/**
+ * Whether one decoded request is a plan submitted for approval.
+ *
+ * The same narrowing the card uses: a `plan-review` tag means a single verdict
+ * over a single question. A tag on one question of a batch is not a plan review
+ * — one verdict cannot stand for several questions — so the row calls that a
+ * question, which is how the card presents it too.
+ */
+export function isPlanReviewRequest(request: ExtensionUiRequest): boolean {
+  const questions = askUserQuestions(request);
+  return questions.length === 1 && questions[0]?.intent?.kind === "plan-review";
+}
+
+/**
+ * The kind of blocking dialog one session has, or null when it has none.
+ *
+ * Reads the app store's own list of pending dialogs, which the server keeps for
+ * exactly this reason: the dialog's id is its address there, and a page reload
+ * can list what is still waiting (`server/src/ui-requests.ts`).
+ */
+export function pendingAskOf(
+  requests: readonly { sessionPath: string; request: ExtensionUiRequest }[],
+  path: string | null,
+): PendingAsk | null {
+  if (path === null) return null;
+  const item = requests.find((request) => request.sessionPath === path);
+  if (item === undefined) return null;
+  return isPlanReviewRequest(item.request) ? "plan-review" : "question";
+}

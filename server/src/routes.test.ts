@@ -828,9 +828,15 @@ describe("composer api", () => {
       thinkingLevel: null,
       // A file that does not exist carries no promise state, so the session
       // reads as the composition a caller would have gotten anyway — and with
-      // no leading system message yet, that composition is still open.
+      // no leading system message yet, that composition is still open. Plan
+      // mode is the same kind of absence: no log entry, so inactive.
       presetId: "standard",
       presetLocked: false,
+      planMode: false,
+      // No file yet: pi writes a session lazily, on the first real message, so
+      // this is what lets a client tell "the mode is off" from "nothing has said
+      // anything yet" (a `/plan` typed here lives only in the process).
+      sessionOnDisk: false,
     });
   });
 
@@ -1336,6 +1342,107 @@ describe("builtin command api", () => {
     const sessionPath = await openProjectSession("builtin-noname");
     const res = await run(sessionPath, {});
     expect(res.status).toBe(400);
+  });
+});
+
+describe("plan mode api", () => {
+  const header = (cwd: string) => ({
+    type: "session",
+    version: 3,
+    id: "plan-session",
+    timestamp: "2026-01-01T00:00:00.000Z",
+    cwd,
+  });
+
+  /** One `custom` entry in the shape `pi.appendEntry()` writes. */
+  const planEntry = (active: boolean) => ({
+    type: "custom",
+    id: "p1",
+    parentId: null,
+    timestamp: "2026-01-01T00:00:01.000Z",
+    customType: "pi-web-simple:plan-mode",
+    data: { active },
+  });
+
+  /** A session file on disk, the way a switch would find one. */
+  const writePlanSession = async (name: string, entries: unknown[]): Promise<string> => {
+    const path = join(sessionRoot, `--${name}--`, `${name}.jsonl`);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, entries.map((entry) => `${JSON.stringify(entry)}\n`).join(""), "utf8");
+    return path;
+  };
+
+  it("requires an explicit boolean", async () => {
+    const project = await createProject("plan-invalid");
+    const sessionPath = await writePlanSession("plan-invalid", [header(project.path)]);
+    process.env.STUB_SESSION_FILE = sessionPath;
+    // Explicit rather than a toggle: a repeated request must not flip the mode
+    // a second time, so "nothing" is a bad request, not "the other one".
+    const res = await post(`/api/sessions/${encodeURIComponent(sessionPath)}/plan`, {});
+    expect(res.status).toBe(400);
+  });
+
+  it("treats the running process as authoritative, even against the file", async () => {
+    const project = await createProject("plan-state");
+    const sessionPath = await writePlanSession("plan-state", [header(project.path), planEntry(true)]);
+    process.env.STUB_SESSION_FILE = sessionPath;
+    // The stub answers no entries at all — a session that has not spoken yet, as
+    // pi holds it in memory. The file's entry is another view's; the mode is off,
+    // and answering the requested state instead would paint a click rather than
+    // the log.
+    const res = await post<{ ok: boolean; planMode: boolean }>(
+      `/api/sessions/${encodeURIComponent(sessionPath)}/plan`,
+      { active: false },
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.planMode).toBe(false);
+  });
+
+  it("falls back to the file when the process cannot answer", async () => {
+    const project = await createProject("plan-fallback");
+    const sessionPath = await writePlanSession("plan-fallback", [header(project.path), planEntry(true)]);
+    process.env.STUB_SESSION_FILE = sessionPath;
+    process.env.STUB_FAIL_GET_ENTRIES = "1";
+
+    const res = await post<{ ok: boolean; planMode: boolean }>(
+      `/api/sessions/${encodeURIComponent(sessionPath)}/plan`,
+      { active: true },
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.planMode).toBe(true);
+  });
+
+  it("prefers the running process, which is ahead of the file", async () => {
+    const project = await createProject("plan-process");
+    // The file says off, the process says on: pi writes its session lazily, so a
+    // switch made before the first message exists only in memory, and reading
+    // the file alone would report the mode as off.
+    const sessionPath = await writePlanSession("plan-process", [header(project.path), planEntry(false)]);
+    process.env.STUB_SESSION_FILE = sessionPath;
+    process.env.STUB_ENTRIES = JSON.stringify([
+      {
+        type: "custom",
+        id: "p1",
+        parentId: null,
+        customType: "pi-web-simple:plan-mode",
+        data: { active: true },
+      },
+    ]);
+
+    const res = await post<{ ok: boolean; planMode: boolean }>(
+      `/api/sessions/${encodeURIComponent(sessionPath)}/plan`,
+      { active: true },
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.planMode).toBe(true);
+  });
+
+  afterEach(() => {
+    delete process.env.STUB_SESSION_FILE;
+    delete process.env.STUB_ENTRIES;
+    delete process.env.STUB_ENTRIES_LEAF;
+    delete process.env.STUB_FAIL_GET_ENTRIES;
   });
 });
 

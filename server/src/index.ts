@@ -12,6 +12,7 @@ import { SessionTitleService } from "./title-service.ts";
 import { SessionWatcher } from "./watch.ts";
 import { WorkspaceWatcher } from "./workspace-watch.ts";
 import { pendingUiRequests, webEventFor, type PiFrame } from "./ui-requests.ts";
+import { reconcileEvent } from "./queue.ts";
 
 // Single bridge from process-level session activity to the browser stream.
 // Which frames survive that bridge is `webEventFor`'s decision, not this file's.
@@ -32,6 +33,10 @@ const titleService = new SessionTitleService({
 });
 
 registry.onEvent((handle, event) => {
+  // Queue drains and terminal-side enqueues reach the mirror as raw frames,
+  // before any translation — the mirror keeps image payloads the frame text
+  // cannot carry (see `queue.ts`).
+  reconcileEvent(handle, event as unknown as { type: string });
   // `extension_ui_request` is part of pi's UI sub-protocol and is not in the
   // typed agent-event union, so this check goes through a widened view. A
   // question batch is published in its decoded form (`method: "ask_user"`)

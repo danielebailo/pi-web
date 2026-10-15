@@ -86,22 +86,62 @@ describe("QuestionComposer", () => {
   });
 
   it("renders a plan-review question as an approval card instead of an option list", () => {
-    const html = card([
-      {
-        id: "plan",
-        header: "Migration plan",
-        question: "Approve this plan?",
-        detail: "# Plan\n\nStep one.",
-        options: [{ label: "Approve" }, { label: "Request changes" }],
-        intent: { kind: "plan-review", approve: "Approve" },
-      },
-    ]);
+    const html = card(
+      [
+        {
+          id: "plan",
+          header: "Migration plan",
+          question: "Approve this plan?",
+          detail: "# Plan\n\nStep one.\n\nStep two turns the tap off.",
+          options: [{ label: "Approve" }, { label: "Request changes" }],
+          intent: { kind: "plan-review", approve: "Approve" },
+        },
+      ],
+      { onOpenPlan: () => true },
+    );
 
     expect(html).toContain("Plan review");
+    // The way into the full document is the sidebar (dsh's `reviewLink`), not an
+    // expansion on the card — the card shows enough to recognise the plan.
     expect(html).toContain("View full plan");
+    expect(html).toContain("Open plan in sidebar");
+    expect(html).not.toContain("Step two turns the tap off.");
     // The list is replaced, not stacked under the plan: the verdict is the
     // smallest thing on the card if it is drawn as a fourth row of options.
     expect(html).not.toContain('role="radiogroup"');
+  });
+
+  it("gives a plan review the card to itself, with none of the ask chrome", () => {
+    // The ask presentation brings a header, a pager, a skip and a submit. A plan
+    // review takes the card over instead (dsh's `PlanReviewPanel`), so each of
+    // those would be either meaningless or a second, conflicting way to answer —
+    // Skip sends the plan back as "keep planning", and Submit refuses because
+    // nothing is selected.
+    const html = card(
+      [
+        {
+          id: "plan",
+          header: "Migration plan",
+          question: "Approve this plan?",
+          detail: "# Plan\n\nStep one.",
+          options: [{ label: "Approve" }, { label: "Request changes" }],
+          intent: { kind: "plan-review", approve: "Approve" },
+        },
+      ],
+      { onOpenPlan: () => true },
+    );
+
+    // The review's own card: a tinted strip over the plan's title, and nothing
+    // the ask card would have drawn around it.
+    expect(html).toContain("Plan review");
+    expect(html).toContain("<h3");
+    expect(html).not.toContain("<h2");
+    expect(html).not.toContain("Question 1 of 1");
+    expect(html).not.toContain("Skip");
+    expect(html).not.toContain("Submit");
+    expect(html).not.toContain("Cancel (Esc)");
+    // The question text is the card's accessible name, not a second title.
+    expect(html).toContain('aria-label="Approve this plan?"');
   });
 
   it("keeps a tagged question in the generic flow when the batch asks several", () => {

@@ -81,6 +81,13 @@ interface AskUserIntent {
   kind: "plan-review";
   /** The option label that approves the plan; every other label declines it. */
   approve: string;
+  /**
+   * The tool invocation that submitted the plan, when there is one.
+   *
+   * Passed through to the client so it can reopen the *logged* plan after the
+   * review closes (dsh's `PlanReview.callId`, and the same field name here).
+   */
+  callId?: string;
 }
 
 /** One question in a batch, after validation. */
@@ -148,6 +155,12 @@ const QuestionSchema = Type.Object({
       approve: Type.String({
         description: "The option label that approves the plan; every other option declines it.",
       }),
+      callId: Type.Optional(
+        Type.String({
+          description:
+            "The tool invocation that submitted the plan, when it has one; a client uses it to reopen the logged plan.",
+        }),
+      ),
     }),
   ),
 });
@@ -247,7 +260,12 @@ function validateIntent(
       `invalid intent: approve label ${JSON.stringify(intent.approve)} is not one of this question's options`,
     );
   }
-  return { kind: intent.kind, approve: intent.approve };
+  const callId = intent.callId?.trim();
+  return {
+    kind: intent.kind,
+    approve: intent.approve,
+    ...(callId === undefined || callId.length === 0 ? {} : { callId }),
+  };
 }
 
 /**

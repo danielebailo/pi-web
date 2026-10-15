@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { PACKAGE_ROOT } from "./config.ts";
 
 /**
  * Agent presets: how a session's pi process is composed at spawn time.
@@ -17,15 +17,6 @@ import { fileURLToPath } from "node:url";
  * so its composition is fixed"), reached through the process instead of the
  * durable log.
  */
-
-/**
- * pi-web-simple's own package root.
- *
- * `server/src/` under tsx and `server/build/` inside the published package are
- * both one level below it, so one relative path covers dev and installed — the
- * same rule `config.ts` uses for `web/dist`.
- */
-const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 /**
  * The extension that carries the `/web` command, and the only entry in the
@@ -45,11 +36,13 @@ const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const WEB_EXTENSION = join(PACKAGE_ROOT, "extensions", "index.js");
 
 /**
- * The tools this deployment loads into the pi processes it spawns.
+ * The tools and the plan mode this deployment loads into the pi processes it
+ * spawns.
  *
- * Neither file is in the package's `pi.extensions` manifest. That manifest is
- * what turns a `pi install npm:pi-web-simple` (or a `packages` entry) into
- * tools for *every* session on the machine, and neither tool belongs there:
+ * None of these files is in the package's `pi.extensions` manifest. That
+ * manifest is what turns a `pi install npm:pi-web-simple` (or a `packages`
+ * entry) into tools for *every* session on the machine, and none of them
+ * belongs there:
  *
  * - `ask-user`'s batch format is only decodable by this deployment's client. A
  *   terminal session could at best unfold one batch into a series of native
@@ -59,14 +52,19 @@ const WEB_EXTENSION = join(PACKAGE_ROOT, "extensions", "index.js");
  *   shape this deployment's panel and transcript row project. Listed in the
  *   manifest, its only contribution to a terminal session is one more tool row
  *   and its prompt snippet.
+ * - `plan-mode` is a collaboration stance rather than a capability, but it
+ *   carries the same cost: a `/plan` command, an `exit_plan_mode` tool, and one
+ *   prompt section in **every** session on the machine. Plan mode is a decision
+ *   this deployment's user makes in its own UI.
  *
  * The consequence, stated rather than implied: a plain terminal session has no
- * question tool and no todo tool (pi ships neither) and no `/todos` overlay.
- * Both files keep the branch that serves a terminal (`ctx.mode === "tui"`) for
- * a session that loads them by hand — `pi -e extensions/todo.ts`.
+ * question tool, no todo tool (pi ships neither), no `/todos` overlay, and no
+ * plan mode. All three files keep the branch that serves a terminal
+ * (`ctx.mode === "tui"`) for a session that loads them by hand —
+ * `pi -e extensions/todo.ts`, and likewise for the other two.
  *
- * The minimal preset gets neither (see `presetSpawnArgs`): dsh's minimal roster
- * has no todo tool and no question batch.
+ * The minimal preset gets none of them (see `presetSpawnArgs`): dsh's minimal
+ * roster has no todo tool, no question batch, and no plan mode.
  *
  * Guarded by the caller, like `/web`: pi treats an explicit path it cannot load
  * as a startup error, and losing a tool beats losing the session.
@@ -74,6 +72,7 @@ const WEB_EXTENSION = join(PACKAGE_ROOT, "extensions", "index.js");
 const SESSION_EXTENSIONS: readonly string[] = [
   join(PACKAGE_ROOT, "extensions", "ask-user.ts"),
   join(PACKAGE_ROOT, "extensions", "todo.ts"),
+  join(PACKAGE_ROOT, "extensions", "plan-mode.ts"),
 ];
 
 /** The preset a session runs when the caller names none. */

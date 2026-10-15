@@ -193,6 +193,27 @@ load-stub 的 20k events/s/会话是刻意压到上限的。真实模型流式�
 8. 多工作区这一侧（`watch.ts` 每项目一个 `fs.watch`、`sessions.ts` 每项目一次目录签名 + 缓存未命中时一次 `SessionManager.list`）本次未压测；从代码看成本是 O(项目数)、非递归、单层，在几十个项目规模内可忽略。
 9. **流式 Markdown 的解析成本**（当前会话 1.19 ms/事件的主因）：每个 delta 都用累计后的 partial 文本调一次 `react-markdown`。已有 rAF 合并，但仍可进一步按时间窗节流，或对已固定的前缀做缓存，避免每帧重新解析整段。
 
+## 文件引用（行为验证）
+
+`bench/verify-file-refs.ts` 和场景 C/D 共用同一套设施（真实前端产物 + 真实 Chrome，经 CDP 驱动），但它断言的是**行为**而不是性能，所以不往 `results/` 写数字。
+
+它造的会话里，回答同时含五种写法：一个带 label 的链接（`[the loader](src/app.ts#L24-L30)`）、一个行内代码（`` `useConversation.ts:396` ``）、一个超过整文件读取上限的分页文件（`` `big.log:25000` ``）、一个图片（`[the shot](logo.svg)`），以及一个同样长得像路径但本轮没碰过的词。然后它在真实界面里点一遭，验证整条链：
+
+- Markdown → chip（label 取舍、路径与行号在 `data-*` 上、未命中保持 code）；
+- 词汇表判定（行内代码的 basename 唯一命中）；
+- 点击 → 右栏预览标签页 → `CodeView` 滚到目标行、高亮、上语法色、读出来的内容对得上；
+- 同一个文件的第二次点击只移动那个标签页，另一个文件才开第二个；
+- 分页的大文件也能一次到位（行号是文件里的行号，且 `/text` 只请求了一次——服务端扫描，不是客户端逐页追）；
+- 图片引用的悬停预览：chip 上带着 `/raw` 地址，浮层里的 `<img>` 真的解码出来了。
+
+```bash
+pnpm --filter web build      # 先备好前端产物
+pnpm test:file-refs          # 26 项断言，零 LLM 成本
+FILE_REFS_KEEP=1 pnpm test:file-refs   # 保留临时目录与三张截图，便于事后翻看
+```
+
+悬停那一项要说明一下：headless Chrome 不对注入的鼠标移动做命中测试，所以 `mouseover` 不会被合成、`:hover` 始终为空。脚本因此直接调用 React 挂上去的那个 `onMouseEnter`（从节点自己的 props 上读）——真实指针路径由上面的点击覆盖，这里要验的是延迟、定位与那张图。
+
 ## 尚未覆盖
 
 - 真实模型的并发 streaming（场景 A/B/C 的 pi 进程都是替身，delta 速率分布可能与真实不同）。

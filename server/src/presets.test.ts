@@ -21,15 +21,17 @@ describe("preset roster", () => {
 
 describe("presetSpawnArgs", () => {
   it("hands the default preset the tools the manifest leaves out", () => {
-    // Both tools are web-only by construction: the package manifest lists only
+    // All three are web-only by construction: the package manifest lists only
     // `/web`, so no terminal session registers them, and the RPC process this
-    // deployment spawns is handed both files explicitly instead.
+    // deployment spawns is handed them explicitly instead.
     const args = presetSpawnArgs(DEFAULT_PRESET_ID);
     expect(args).toEqual([
       "--extension",
       expect.stringMatching(/extensions[/\\]ask-user\.ts$/),
       "--extension",
       expect.stringMatching(/extensions[/\\]todo\.ts$/),
+      "--extension",
+      expect.stringMatching(/extensions[/\\]plan-mode\.ts$/),
     ]);
   });
 
@@ -51,8 +53,9 @@ describe("presetSpawnArgs", () => {
 
   it("puts only the /web extension back after discovery is disabled", () => {
     // `--no-extensions` drops the manifest's one entry, `/web`, and nothing
-    // else: the two tools this deployment adds are not in the manifest, and the
-    // minimal roster keeps neither — so `/web` is the one extension restored.
+    // else: the tools this deployment adds are not in the manifest, and the
+    // minimal roster keeps none of them — so `/web` is the one extension
+    // restored.
     const args = presetSpawnArgs("minimal");
     const restored = args.slice(args.indexOf("--extension") + 1);
     expect(restored).toHaveLength(1);

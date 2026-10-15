@@ -72,6 +72,12 @@ export interface ConversationView {
    * while its files are still being written.
    */
   undeliveredPrompts: number;
+  /**
+   * The queued prompts this browser is waiting for pi to take up, oldest
+   * first. The queue dock renders them; see `QueuedPrompt` for why the list
+   * mirrors the trailing undelivered user rows one-to-one.
+   */
+  queue: QueuedPrompt[];
   toolExecutions: Record<string, ToolExecution>;
   /**
    * Whether this session's agent loop is running right now.
@@ -127,6 +133,24 @@ export interface RetryState {
 }
 
 /**
+ * One message this browser queued (steered or followed up) that pi has not
+ * taken up yet.
+ *
+ * The queue dock renders this list, and `queueRemove`/`queueEdit` act on it by
+ * id. The entries mirror the trailing undelivered user rows positionally — the
+ * same sends, in the same order — because both are appended and consumed
+ * together (see `send` and the `message_start` delivery below). A queue pi
+ * filled from the terminal has no entries here, and no rows in the transcript
+ * to remove either.
+ */
+export interface QueuedPrompt {
+  id: string;
+  text: string;
+  images: ImageBlock[];
+  mode: "steer" | "followUp";
+}
+
+/**
  * The checkpoint a `compaction_end` frame left behind, or null.
  *
  * pi reports a failed and an aborted compaction on the same frame, with no
@@ -165,6 +189,7 @@ const emptyView: ConversationView = {
   pendingQuestions: [],
   partial: null,
   undeliveredPrompts: 0,
+  queue: [],
   toolExecutions: {},
   isStreaming: false,
   compacting: false,
@@ -186,6 +211,26 @@ function countUserMessages(messages: readonly AgentMessage[]): number {
     if (message.role === "user") count += 1;
   }
   return count;
+}
+
+/**
+ * Indexes of the trailing user messages pi has not taken up yet, oldest first.
+ *
+ * These pair positionally with `queueRef`'s entries — both lists grow and
+ * drain together — which is how a queue edit finds the transcript row it has
+ * to rewrite. The walk stays inside the trailing `undelivered` user messages,
+ * so a delivered row can never be reached even if the tail holds a
+ * non-user block between them.
+ */
+function undeliveredUserIndexes(
+  messages: readonly AgentMessage[],
+  undelivered: number,
+): number[] {
+  const indexes: number[] = [];
+  for (let i = messages.length - 1; i >= 0 && indexes.length < undelivered; i -= 1) {
+    if (messages[i]?.role === "user") indexes.unshift(i);
+  }
+  return indexes;
 }
 
 /**
@@ -338,6 +383,18 @@ function userContent(message: string, images: ImageBlock[]): string | ContentBlo
 export interface ConversationApi extends ConversationView {
   /** `images` ride along with the text; pi accepts either one without the other. */
   send(text: string, mode: "prompt" | "steer" | "followUp", images?: ImageBlock[]): Promise<boolean>;
+  /**
+   * Send one slash text pi will consume as an **extension command**.
+   *
+   * The difference from `send` is not the request — both post a prompt — but who
+   * draws the user turn. An extension command records only the message it
+   * submits itself (`/plan <message>` steers one; a bare `/plan` records
+   * nothing), so drawing the typed line optimistically would leave a row pi
+   * never wrote, which only a reload could clear. Instead the command's own
+   * message is adopted from the stream, and a command that submits nothing adds
+   * no row at all.
+   */
+  runCommand(text: string, images?: ImageBlock[]): Promise<boolean>;
   abort(): Promise<void>;
   reload(): Promise<void>;
   /**
@@ -350,6 +407,17 @@ export interface ConversationApi extends ConversationView {
    * an extension vetoed the fork.
    */
   fork(entryId: string): Promise<{ text: string; sessionPath: string } | null>;
+  /**
+   * Drop one queued message before pi reaches it. Optimistic; resolves false
+   * when the item was not queued here or pi had already started sending it.
+   */
+  queueRemove(id: string): Promise<boolean>;
+  /**
+   * Rewrite one queued message's text before pi reaches it. Carries text only
+   * — pi's queue holds strings, so a rewritten row drops its images, the same
+   * rule dsh's queue editor applies.
+   */
+  queueEdit(id: string, text: string): Promise<boolean>;
 }
 
 /**
@@ -418,6 +486,26 @@ export function useConversation(sessionPath: string | null): ConversationApi {
    * echo is not what was typed.
    */
   const deliveredUsersRef = useRef(0);
+  /**
+   * The queued prompts this browser is waiting on — the queue dock's rows.
+   *
+   * Kept alongside `deliveredUsersRef` because the two describe the same
+   * window: an entry is appended when a steered or followed-up send resolves
+   * to pi, and consumed from the front by the same `message_start` that
+   * counts a delivery. A remove or edit splices the entry and its transcript
+   * row together, so the pair cannot drift; a reload or a session switch
+   * drops the whole list, since pi's surviving queue re-reveals itself as its
+   * messages are taken up.
+   */
+  const queueRef = useRef<QueuedPrompt[]>([]);
+  /**
+   * Whether the next user message pi records belongs to an extension command.
+   *
+   * Set while `runCommand` is in flight, cleared by the first user `message_end`
+   * (the command's own message) or by any ordinary `send`. The flag is what
+   * replaces the optimistic turn for commands: pi's row is the only row.
+   */
+  const adoptUserRef = useRef(false);
   const forkPointsRef = useRef<ForkPoint[]>([]);
   const slotRef = useRef<StreamSlot | null>(null);
   const toolsRef = useRef<Record<string, ToolExecution>>({});
@@ -485,6 +573,7 @@ export function useConversation(sessionPath: string | null): ConversationApi {
       // and one pass over a few hundred messages is cheaper than a counter that
       // can drift from the list it describes.
       undeliveredPrompts,
+      queue: [...queueRef.current],
       toolExecutions: { ...toolsRef.current },
       isStreaming: streamingRef.current,
       compacting: compactingRef.current,
@@ -585,6 +674,10 @@ export function useConversation(sessionPath: string | null): ConversationApi {
             // or another tab has no row here to confirm.
             if (deliveredUsersRef.current < countUserMessages(messagesRef.current)) {
               deliveredUsersRef.current += 1;
+              // The same event consumes the queue dock's oldest row; gating on
+              // the delivery keeps a terminal-side take-up from eating a row
+              // this browser queued.
+              queueRef.current = queueRef.current.slice(1);
             }
           }
           break;
@@ -642,6 +735,14 @@ export function useConversation(sessionPath: string | null): ConversationApi {
             if (!hadAssistant && !persistedNotifiedRef.current) {
               persistedNotifiedRef.current = true;
               actions.refreshSelectedProjectSessions();
+            }
+          } else if (message.role === "user") {
+            // An extension command's own message: the command steered it, so pi
+            // is the only party that wrote a row for it — the composer
+            // deliberately draws none (see `runCommand`).
+            if (adoptUserRef.current) {
+              adoptUserRef.current = false;
+              messagesRef.current = [...messagesRef.current, message];
             }
           } else if (message.role === "toolResult" || message.role === "bashExecution") {
             // Rendered through the tool card that produced them, kept here as
@@ -783,6 +884,9 @@ export function useConversation(sessionPath: string | null): ConversationApi {
         // Everything in the file is a message pi already took up, so the
         // transcript starts with nothing queued behind it.
         deliveredUsersRef.current = countUserMessages(visible);
+        // The dock rows belonged to the browser that queued them; pi's
+        // surviving queue re-reveals itself through deliveries instead.
+        queueRef.current = [];
         forkPointsRef.current = forkPoints;
         persistedNotifiedRef.current = visible.some((message) => message.role === "assistant");
         loadingRef.current = false;
@@ -802,6 +906,9 @@ export function useConversation(sessionPath: string | null): ConversationApi {
   useEffect(() => {
     messagesRef.current = [];
     deliveredUsersRef.current = 0;
+    queueRef.current = [];
+    // A command's pending adoption belongs to the stream it was sent on.
+    adoptUserRef.current = false;
     slotRef.current = null;
     toolsRef.current = {};
     streamingRef.current = false;
@@ -856,6 +963,8 @@ export function useConversation(sessionPath: string | null): ConversationApi {
   const send = useCallback<ConversationApi["send"]>(
     async (text, mode, images = []) => {
       if (!sessionPath) return false;
+      // An ordinary send always owns its own optimistic turn.
+      adoptUserRef.current = false;
       const message = text.trim();
       if (message.length === 0 && images.length === 0) return false;
 
@@ -873,6 +982,14 @@ export function useConversation(sessionPath: string | null): ConversationApi {
       // — it waits in pi's queue, and that wait is what `undeliveredPrompts`
       // reports until pi reaches it.
       if (mode === "prompt") deliveredUsersRef.current += 1;
+      // The queue dock's row exists from the same moment the transcript row
+      // does, so a remove or edit cannot race past a send that is still in
+      // flight; the rollback below takes it back out if pi refused it.
+      const queueEntry: QueuedPrompt | null =
+        mode === "prompt"
+          ? null
+          : { id: crypto.randomUUID(), text: message, images, mode };
+      if (queueEntry) queueRef.current = [...queueRef.current, queueEntry];
       publish();
 
       try {
@@ -884,8 +1001,103 @@ export function useConversation(sessionPath: string | null): ConversationApi {
         // Roll the optimistic turn back so the failure is visible, not implied.
         messagesRef.current = messagesRef.current.slice(0, -1);
         if (mode === "prompt") deliveredUsersRef.current -= 1;
+        if (queueEntry) {
+          queueRef.current = queueRef.current.filter((entry) => entry.id !== queueEntry.id);
+        }
         errorRef.current = (err as Error).message;
         streamingRef.current = false;
+        publish();
+        return false;
+      }
+    },
+    [sessionPath, publish],
+  );
+
+  /**
+   * Remove or rewrite one queued message.
+   *
+   * The optimistic application mirrors what the server will do — splice the
+   * queue entry and its transcript row together — so the dock and the
+   * transcript never disagree for longer than one round trip. A 409 means pi
+   * started sending the message between the user's tap and the call; both
+   * snapshots go back and the error line says so.
+   */
+  const queueMutate = useCallback(
+    async (id: string, action: { kind: "remove" } | { kind: "edit"; text: string }): Promise<boolean> => {
+      if (!sessionPath) return false;
+      const entries = queueRef.current;
+      const position = entries.findIndex((entry) => entry.id === id);
+      if (position === -1) return false;
+      const entry = entries[position]!;
+      // pi addresses queue items per lane; the dock's index is over the
+      // interleaved list, so the lane position is derived here.
+      const laneIndex = entries
+        .slice(0, position)
+        .filter((earlier) => earlier.mode === entry.mode).length;
+      const snapshotQueue = entries;
+      const snapshotMessages = messagesRef.current;
+      const undelivered = Math.max(
+        0,
+        countUserMessages(messagesRef.current) - deliveredUsersRef.current,
+      );
+      const rowIndexes = undeliveredUserIndexes(messagesRef.current, undelivered);
+      const rowIndex = rowIndexes[position];
+      if (rowIndex === undefined) return false;
+
+      const nextEntries = [...entries];
+      if (action.kind === "remove") nextEntries.splice(position, 1);
+      else nextEntries[position] = { ...entry, text: action.text };
+      const nextMessages = [...messagesRef.current];
+      if (action.kind === "remove") nextMessages.splice(rowIndex, 1);
+      else nextMessages[rowIndex] = { ...nextMessages[rowIndex]!, content: userContent(action.text, entry.images) };
+      queueRef.current = nextEntries;
+      messagesRef.current = nextMessages;
+      publish();
+
+      try {
+        const { failed } = await api.queueUpdate(sessionPath, {
+          mode: entry.mode,
+          index: laneIndex,
+          expectedText: entry.text,
+          action,
+        });
+        if (failed.length > 0) errorRef.current = failed.join("\n");
+        return true;
+      } catch (err) {
+        queueRef.current = snapshotQueue;
+        messagesRef.current = snapshotMessages;
+        errorRef.current = (err as Error).message;
+        publish();
+        return false;
+      }
+    },
+    [sessionPath, publish],
+  );
+
+  const queueRemove = useCallback(
+    (id: string) => queueMutate(id, { kind: "remove" }),
+    [queueMutate],
+  );
+
+  const queueEdit = useCallback(
+    (id: string, text: string) => queueMutate(id, { kind: "edit", text: text.trim() }),
+    [queueMutate],
+  );
+
+  const runCommand = useCallback<ConversationApi["runCommand"]>(
+    async (text, images = []) => {
+      if (!sessionPath) return false;
+      const message = text.trim();
+      if (message.length === 0 && images.length === 0) return false;
+      // Armed before the request, because pi may record the command's message
+      // and emit it before the RPC reply lands.
+      adoptUserRef.current = true;
+      try {
+        await api.prompt(sessionPath, message, images);
+        return true;
+      } catch (err) {
+        adoptUserRef.current = false;
+        errorRef.current = (err as Error).message;
         publish();
         return false;
       }
@@ -919,8 +1131,13 @@ export function useConversation(sessionPath: string | null): ConversationApi {
   useEffect(() => {
     if (!sessionPath || loadedPath !== sessionPath) return;
     const pending = actions.takePendingPrompt(sessionPath);
-    if (pending) void send(pending.text, pending.mode, pending.images);
-  }, [sessionPath, loadedPath, send]);
+    // A queued extension command goes out the command way: pi records only what
+    // the command submits, so the optimistic turn would be a row it never wrote.
+    if (pending) {
+      if (pending.command === true) void runCommand(pending.text, pending.images);
+      else void send(pending.text, pending.mode, pending.images);
+    }
+  }, [sessionPath, loadedPath, send, runCommand]);
 
   const fork = useCallback(
     async (entryId: string): Promise<{ text: string; sessionPath: string } | null> => {
@@ -940,7 +1157,17 @@ export function useConversation(sessionPath: string | null): ConversationApi {
   // app-wide one. Either being true means the turn is still moving, so the two
   // are unioned: the ref knows about a run whose start frame this subscription
   // missed, and the mark knows about one that started before this hook mounted.
-  return { ...view, isStreaming: view.isStreaming || running, send, abort, reload, fork };
+  return {
+    ...view,
+    isStreaming: view.isStreaming || running,
+    send,
+    runCommand,
+    abort,
+    reload,
+    fork,
+    queueRemove,
+    queueEdit,
+  };
 }
 
 export { textFromContent };

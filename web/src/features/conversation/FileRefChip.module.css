@@ -1,0 +1,114 @@
+/*
+ * The file-reference chip.
+ *
+ * It reads as the inline code it replaces — same code face, same
+ * `--dsw-alias-markdown-code-block` fill — plus the two things that say it can
+ * be clicked: a hairline border and the link colour. Anything louder (a solid
+ * chip like `PlanChip`) would make every file name in a paragraph outrank the
+ * sentence it sits in, and a message that names six files would read as a row of
+ * buttons rather than as prose.
+ *
+ * `vertical-align: text-bottom` is what seats it on the line: an inline-flex box
+ * has no baseline of its own to offer, so the default would hang the chip off
+ * the bottom of the text box. Aligning to the text's own bottom edge keeps it
+ * level with the surrounding 14px prose while the label stays 12.5px.
+ */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  margin: 0;
+  padding: 1px 6px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: 5px;
+  background: var(--dsw-alias-markdown-code-block);
+  color: var(--dsw-alias-link);
+  font-family: var(--ds-font-family-code);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 18px;
+  vertical-align: text-bottom;
+  cursor: pointer;
+}
+
+.chip:hover {
+  border-color: var(--dsw-alias-border-l3);
+  background: var(--dsw-alias-interactive-bg-hover);
+  text-decoration: underline dotted var(--dsw-alias-link);
+  text-underline-offset: 3px;
+}
+
+.chip:focus-visible {
+  outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-link));
+  outline-offset: 1px;
+}
+
+/* The glyph is a category mark, not information: it is held back so the file
+ * name stays the darkest thing in the chip. */
+.glyph {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  opacity: 0.7;
+}
+
+/* A deep path in a long sentence clips instead of pushing the paragraph wide;
+ * the title carries the whole thing. */
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * The hover preview on an image reference.
+ *
+ * `fixed` comes from the component, which places it in viewport coordinates:
+ * the transcript scrolls inside a box that would clip an absolutely positioned
+ * panel at its own edges, and a picture near the top of a message has to be able
+ * to open upward out of that box. The look is the one the sidebar's image
+ * preview has — a framed picture on a raised layer — because it is showing the
+ * same thing in a smaller room.
+ */
+.preview {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 320px;
+  padding: 8px;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-2);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 24%);
+}
+
+.previewImage {
+  display: block;
+  max-width: 100%;
+  max-height: 240px;
+  object-fit: contain;
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+/* The name under the picture, in the same code face the chip uses: a reader
+ * comparing two screenshots picks the one they meant by its file name. */
+.previewName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--ds-font-family-code);
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* A picture that did not load says so in place rather than showing a broken
+ * frame; the chip is still there to click. */
+.previewFailed {
+  padding: 10px 8px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+}

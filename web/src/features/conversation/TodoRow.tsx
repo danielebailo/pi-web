@@ -1,15 +1,19 @@
+import { useMemo } from "react";
 import { Glyph } from "../../components/dsh-icons.tsx";
 import { StateDot } from "../../components/StateDot.tsx";
 import type { ToolCallBlock } from "../../lib/types.ts";
 import { DisclosureRow } from "./DisclosureRow.tsx";
 import { useDisclosureOpen } from "./use-disclosure-open.ts";
-import { TodoList } from "./TodoList.tsx";
+import { TodoList, StatusGlyph } from "./TodoList.tsx";
 import {
   parseTodoSnapshot,
   rowSummary,
   summarizeTodos,
   todosInArgs,
+  type TodoItem,
 } from "./todo-model.ts";
+import { todoDiffModel, todoStatusLabel, type TodoDiff, type TodoDiffItem } from "./todo-diff-model.ts";
+import { useTodoBaseline } from "./todo-history.tsx";
 import type { ToolExecution } from "./useConversation.ts";
 import styles from "./TodoRow.module.css";
 import { useT } from "../../lib/app-state.ts";
@@ -24,9 +28,11 @@ import { useT } from "../../lib/app-state.ts";
  * running or rejected row still gets a real summary instead of the generic tool
  * one.
  *
- * Expanded it shows the snapshot the call returned — the plan as it stood right
- * after it — or, for a call that has not answered yet, the list it was asked to
- * write.
+ * Expanded it shows what the call changed rather than just the snapshot it left
+ * behind — dsh's details: a caption naming the baseline, a per-row change mark
+ * for added and removed rows, the old status for rows whose status moved, and
+ * the untouched rows folded away. The very first write of a session shows its
+ * list plainly; there is nothing to compare it against yet.
  */
 export function TodoRow({
   call,
@@ -42,6 +48,7 @@ export function TodoRow({
   const [open, setOpen] = useDisclosureOpen(defaultOpen);
   const state = execution?.isError ? "error" : execution?.running ? "running" : "ok";
   const running = execution?.running ?? false;
+  const baseline = useTodoBaseline(call.id);
 
   const args = call.arguments ?? execution?.args;
   // The result is authoritative; the arguments are the fallback, and the only
@@ -49,13 +56,17 @@ export function TodoRow({
   const todos = parseTodoSnapshot(execution?.details) ?? todosInArgs(args);
   const summary = todos === null ? null : summarizeTodos(todos);
   const extra = summary?.activeExtra ?? 0;
+  const diff = useMemo(
+    () => (todos === null ? null : todoDiffModel(todos, baseline, t)),
+    [todos, baseline, t],
+  );
 
   const body =
     todos === null
       ? running
         ? t("common.runningEllipsis")
         : t("todo.noSnapshot")
-      : todos.length === 0
+      : todos.length === 0 && (diff === null || diff.items.length === 0)
         ? t("todo.empty")
         : null;
 
@@ -69,7 +80,7 @@ export function TodoRow({
         titleClassName={styles.title}
         // A rejected call keeps its own glyph convention: the error dot.
         icon={state === "error" ? <StateDot state="error" /> : <Glyph name="checklist" />}
-        title={t("todo.panelTitle")}
+        title={t("todo.rowTitle")}
         open={open}
         expandable
         expandOnRowClick
@@ -80,13 +91,20 @@ export function TodoRow({
             <span className={styles.summary} data-error={execution?.isError || undefined}>
               {summary === null ? t(running ? "common.runningEllipsis" : "todo.noSnapshot") : rowSummary(summary, t)}
             </span>
+            {diff !== null && summary !== null ? (
+              <span className={styles.diffSummary}>{diff.summary}</span>
+            ) : null}
             {extra > 0 ? <span className={styles.extra}>{`+${String(extra)}`}</span> : null}
           </>
         }
       >
         <div className={styles.card}>
           {body === null && todos !== null ? (
-            <TodoList todos={todos} />
+            diff === null ? (
+              <TodoList todos={todos} />
+            ) : (
+              <TodoDiffList diff={diff} todos={todos} />
+            )
           ) : (
             <span className={styles.empty}>
               {body ?? t(running ? "common.runningEllipsis" : "todo.noSnapshot")}
@@ -95,5 +113,63 @@ export function TodoRow({
         </div>
       </DisclosureRow>
     </div>
+  );
+}
+
+/**
+ * The expanded diff card: caption, changed rows with their marks, then the
+ * untouched ones folded away. A row's status glyph stays for kept rows (a moved
+ * row shows no mark at all — dsh reports it through the label, not the art),
+ * while added and removed rows trade the glyph for the mark.
+ */
+function TodoDiffList({ diff, todos }: { diff: TodoDiff; todos: readonly TodoItem[] }) {
+  const t = useT();
+  return (
+    <div className={styles.diff}>
+      <div className={styles.diffCaption}>{diff.caption}</div>
+      <ul className={styles.diffList}>
+        {diff.items.map((item) => (
+          <DiffRow key={item.content} item={item} />
+        ))}
+      </ul>
+      {diff.unchanged.length > 0 ? (
+        <details className={styles.unchanged}>
+          <summary>{t("todo.diff.unchanged", { count: diff.unchanged.length })}</summary>
+          <TodoList todos={diff.unchanged} />
+        </details>
+      ) : null}
+      {todos.length === 0 ? <span className={styles.empty}>{t("todo.empty")}</span> : null}
+    </div>
+  );
+}
+
+function DiffRow({ item }: { item: TodoDiffItem }) {
+  const t = useT();
+  const statusLabel = todoStatusLabel(item.status, t);
+  return (
+    <li
+      className={styles.diffItem}
+      data-status={item.status}
+      data-change={item.change ?? undefined}
+    >
+      <span
+        className={styles.glyph}
+        role={item.change === null ? undefined : "img"}
+        aria-label={item.change === null ? undefined : item.changeLabel}
+        aria-hidden={item.change === null ? true : undefined}
+      >
+        {item.change === "added" || item.change === "removed" ? (
+          <span className={styles.diffMark}>{item.change === "added" ? "+" : "−"}</span>
+        ) : (
+          <StatusGlyph status={item.status} />
+        )}
+      </span>
+      <span className={styles.content}>{item.content}</span>
+      {item.previousStatusLabel !== undefined ? (
+        <span className={styles.statusChange}>
+          {item.previousStatusLabel} → {statusLabel}
+        </span>
+      ) : null}
+    </li>
   );
 }

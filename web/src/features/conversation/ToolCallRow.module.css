@@ -74,6 +74,27 @@
   color: var(--dsw-alias-state-error-primary);
 }
 
+/*
+ * The +N -N tally after a file-mutation summary (dsh's diffStat suffix). It
+ * stays the summary's dim color at rest and only colors while the row is
+ * hovered or open, so an idle transcript doesn't glow green and red.
+ */
+.diffStat {
+  margin-left: 10px;
+  font-family: var(--ds-font-family-code);
+  font-size: 11px;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.row:is(:hover, [aria-expanded="true"]) .diffAdded {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.row:is(:hover, [aria-expanded="true"]) .diffRemoved {
+  color: var(--dsw-alias-state-error-primary);
+}
+
 .visuallyHidden {
   clip: rect(0 0 0 0);
   white-space: nowrap;

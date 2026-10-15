@@ -7,6 +7,8 @@ import { useDisclosureOpen } from "./use-disclosure-open.ts";
 import { ImageThumb } from "../../components/ImageLightbox.tsx";
 import { imageBlocksOf } from "../../lib/image-attachments.ts";
 import { classify, deriveSummary, shortenPath, variantTitles, type Variant } from "./row-model.ts";
+import { diffCardModel, diffTotals } from "./diff-card-model.ts";
+import { DiffCard } from "./DiffCard.tsx";
 import type { ToolExecution } from "./useConversation.ts";
 import styles from "./ToolCallRow.module.css";
 import { useT } from "../../lib/app-state.ts";
@@ -81,7 +83,18 @@ export function ToolCallRow({
   const output = execution?.output || blocksToText(execution?.result ?? null);
   const images = imageBlocksOf(execution?.result ?? []);
   const input = useMemo(() => inputText(variant, call), [variant, call]);
-  const showInput = input.length > 0 || running;
+  // A write/edit call whose arguments describe their own change renders as a
+  // diff instead of an argument dump (dsh's file-mutation cards). The model
+  // needs parseable arguments, so a still-streaming call falls back to the
+  // generic sections until its schema is whole.
+  const diff = useMemo(
+    () => diffCardModel(call.name, call.arguments ?? execution?.args, execution?.isError ?? false),
+    [call, execution?.args, execution?.isError],
+  );
+  // The collapsed row ends with a live +N -N tally (dsh's diffStat suffix),
+  // colored only while the row is hovered or open.
+  const totals = useMemo(() => (diff ? diffTotals(diff.diffs) : null), [diff]);
+  const showInput = !diff && (input.length > 0 || running);
 
   // dsh falls back to a generic "工具调用" title for tools it does not know.
   // pi's own tool names carry more than that, so an unrecognised tool is titled
@@ -112,11 +125,20 @@ export function ToolCallRow({
             <span className={styles.summary} data-error={execution?.isError || undefined}>
               {summary}
             </span>
+            {totals ? (
+              <span className={styles.diffStat}>
+                <span className={styles.diffAdded}>+{totals.added}</span>{" "}
+                <span className={styles.diffRemoved}>-{totals.removed}</span>
+              </span>
+            ) : null}
           </>
         }
       >
         <div className={styles.bodyScroll}>
-          <div className={styles.ioCard}>
+          {diff ? (
+            <DiffCard {...diff} />
+          ) : (
+            <div className={styles.ioCard}>
             {showInput ? (
               <>
                 <div className={styles.ioSection}>
@@ -148,7 +170,8 @@ export function ToolCallRow({
                 </div>
               ) : null}
             </div>
-          </div>
+            </div>
+          )}
         </div>
       </DisclosureRow>
     </div>

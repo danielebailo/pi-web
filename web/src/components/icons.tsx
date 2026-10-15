@@ -227,3 +227,37 @@ export const CheckIcon = (props: SVGProps<SVGSVGElement>) => (
     <path d="M3.5 8.5l3 3 6-7" />
   </svg>
 );
+
+/**
+ * Plan mode's own mark: a page with three lines, the plan as a document.
+ *
+ * dsh's `IconPlanOutlineRegular`, redrawn on this file's 16px / 1.4 baseline.
+ * It rides in the composer's control row while plan mode is on — see
+ * `PlanChip`, where this glyph is what the chip shows at rest.
+ */
+export const PlanIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg {...base(props)}>
+    <rect x={3.4} y={2.3} width={9.2} height={11.4} rx={1.7} />
+    <path d="M5.9 5.9h4.2M5.9 8h4.2M5.9 10.1h2.4" />
+  </svg>
+);
+
+/**
+ * The plan chip's hover mark: the same document crossed out by a filled circle,
+ * which is how the chip says the pending click turns plan mode *off*.
+ *
+ * The cross is cut out in the chip's own fill colour rather than drawn with a
+ * second stroke colour, so the glyph works on the brand background in both
+ * appearances. dsh's `IconCloseCircleFillRegular` does the same.
+ */
+export const CloseCircleIcon = (props: SVGProps<SVGSVGElement>) => (
+  <svg {...base(props)} fill="currentColor" stroke="none">
+    <circle cx={8} cy={8} r={6.3} />
+    <path
+      d="M6.2 6.2l3.6 3.6M9.8 6.2l-3.6 3.6"
+      stroke="var(--dsw-alias-bg-layer-1)"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+    />
+  </svg>
+);

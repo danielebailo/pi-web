@@ -1,0 +1,47 @@
+/*
+ * The line-addressed code view (`CodeView.tsx`).
+ *
+ * Its metrics match `PreviewTab.module.css`'s `.text` deliberately: both are the
+ * pane's plain reading surface for a file's contents, and a file that flips
+ * between the pager and the row view as it grows must not change size or face
+ * when it does.
+ */
+.view {
+  font-family: var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--dsw-alias-label-primary);
+  /* A row is a line, so the box is as wide as the longest one and the pane
+   * scrolls sideways — the shape every editor shows a file in. */
+  min-width: 100%;
+  width: max-content;
+  padding: 4px 0;
+}
+
+.numbered {
+  padding-left: 0;
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+  padding: 0 14px;
+}
+
+/* The referenced lines, tinted rather than boxed: a box around a range that can
+ * run for pages would read as a selection the reader made. */
+.row[data-focus] {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.gutter {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+  text-align: right;
+  /* The numbers are address labels, not text to be copied with the code. */
+  user-select: none;
+}
+
+.text {
+  white-space: pre;
+}

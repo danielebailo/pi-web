@@ -1,0 +1,129 @@
+/*
+ * The diff surface. Ported from dsh's DiffBlock.module.css layered over this
+ * project's CodeBlock.module.css card, so a diff reads as a sibling of the
+ * markdown fences rather than a foreign element.
+ */
+.block {
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--dsw-alias-markdown-code-block);
+  border: 0.5px solid var(--dsw-alias-border-l2);
+}
+
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  background: var(--dsw-alias-markdown-code-block-banner);
+  border-bottom: 0.5px solid var(--dsw-alias-border-l2);
+}
+
+.lang {
+  font-family: var(--ds-font-family-code);
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.actions {
+  display: flex;
+  gap: 2px;
+}
+
+.action {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.action:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.action[aria-pressed="true"] {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.body {
+  display: grid;
+  grid-template-columns: minmax(max-content, 1fr);
+  padding: 6px 0 10px;
+  font-family: var(--ds-font-family-code);
+  font-size: 12.5px;
+  line-height: 1.55;
+  overflow-x: auto;
+  scrollbar-gutter: stable;
+}
+
+.line {
+  box-sizing: border-box;
+  min-height: 1lh;
+  padding: 0 14px;
+  white-space: pre;
+  color: var(--dsw-alias-label-primary);
+}
+
+.block[data-code-wrap="true"] .body {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.block[data-code-wrap="true"] .line {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.path {
+  color: var(--dsw-alias-label-secondary);
+  font-weight: 500;
+}
+
+.gap {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.del {
+  color: var(--dsw-alias-state-error-primary);
+  background: var(--dsw-alias-code-diff-deleted);
+  box-shadow: inset 3px 0 0 var(--dsw-alias-state-error-primary);
+}
+
+.del::before {
+  content: "- ";
+}
+
+.add {
+  color: var(--dsw-alias-state-success-primary);
+  background: var(--dsw-alias-code-diff-added);
+  box-shadow: inset 3px 0 0 var(--dsw-alias-state-success-primary);
+}
+
+.add::before {
+  content: "+ ";
+}
+
+.context {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.context::before {
+  content: "  ";
+}
+
+.expand {
+  display: block;
+  width: 100%;
+  padding: 0 14px;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.expand:hover {
+  color: var(--dsw-alias-label-secondary);
+}

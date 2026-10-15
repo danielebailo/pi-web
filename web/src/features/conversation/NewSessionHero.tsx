@@ -22,6 +22,7 @@ import { FileMenu } from "./FileMenu.tsx";
 import { useComposerState } from "./useComposerState.ts";
 import { useImageDraft } from "./useImageDraft.ts";
 import { useSlashCompletion } from "./useSlashCompletion.ts";
+import { extensionCommandName, planCommandOf } from "./slash.ts";
 import { useFileCompletion } from "./useFileCompletion.ts";
 import styles from "./NewSessionHero.module.css";
 
@@ -285,6 +286,12 @@ export function NewSessionHero() {
     // can put it back into this card.
     const outgoing = reference.expand(message);
     reference.clear();
+    // A first message can be an extension command — `/plan` is the one that
+    // matters, and the menu next door offers it — and pi consumes those without
+    // recording a user turn. The handoff has to say so, or the conversation that
+    // mounts for the new session would draw the typed line as a message nothing
+    // ever wrote.
+    const command = planCommandOf(outgoing) !== null || extensionCommandName(outgoing, commands) !== null;
     // Creates the draft immediately and queues the message for the session
     // that replaces it once pi is ready. Only a model the user actually chose
     // is passed on: null means "start on pi's default", which is not the same
@@ -296,6 +303,7 @@ export function NewSessionHero() {
       state.newSessionModel,
       state.newSessionThinkingLevel,
       state.newSessionPresetId,
+      command,
     );
   };
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { actions, appStore, sessionEvents } from "../../lib/app-state.ts";
+import { actions, appStore, isDraftSession, sessionEvents } from "../../lib/app-state.ts";
 import { api } from "../../lib/api.ts";
 import type { ComposerState } from "../../lib/types.ts";
 import { DEFAULT_PRESET_ID } from "../../lib/types.ts";
@@ -49,6 +49,34 @@ export interface ComposerApi {
    * the choice is remembered for `createSession` instead.
    */
   selectPreset(presetId: string): Promise<void>;
+  /**
+   * Record plan mode locally, before the session file can say so.
+   *
+   * pi writes a session file lazily — on the first real message — so a `/plan`
+   * typed into a brand-new session leaves no trace on disk yet, and a read of
+   * that file reports the mode as off. dsh's chip has the same job and reads a
+   * host projection that folds the *pending* selection
+   * (`pending ? !active : active`), so it shows the mode the command just asked
+   * for; this is that idea with the browser as the only place left to hold it.
+   * Every later read — a settled turn, a live read, a reload — replaces it with
+   * the file's own answer.
+   */
+  markPlan(active: boolean): void;
+  /**
+   * Ask the running session what plan mode it holds.
+   *
+   * For the moment right after a `/plan` command: the mode reaches the process
+   * first, and a session that has not spoken yet has no file to read it from.
+   */
+  syncPlan(): Promise<void>;
+  /**
+   * Switch plan mode for the open session.
+   *
+   * The switch itself runs an extension command inside pi (`POST
+   * /api/sessions/:id/plan`), and the reply is the state the session file now
+   * holds — so the badge follows the file rather than the click.
+   */
+  selectPlan(active: boolean): Promise<void>;
 }
 
 /**
@@ -95,11 +123,27 @@ export function useComposerState({ sessionPath, projectId }: ComposerSource): Co
   const sourceRef = useRef<string | null>(sourceKey);
   const stateRef = useRef<ComposerState | null>(null);
   const inflightRef = useRef<Promise<void> | null>(null);
+  /**
+   * A plan-mode switch this browser made that no authoritative read has confirmed.
+   *
+   * pi writes a session lazily, so while `sessionOnDisk` is false a read has
+   * nothing to say about the mode and must not overwrite the switch; once the
+   * file exists it is authoritative and this is dropped.
+   */
+  const planPendingRef = useRef<boolean | null>(null);
 
   const apply = useCallback((key: string, next: ComposerState): void => {
     if (sourceRef.current !== key) return;
-    stateRef.current = next;
-    setState(next);
+    const pending = planPendingRef.current;
+    // A read of a session that has no file yet cannot deny a switch made here
+    // (pi writes the file on the first real message), so the local value stands
+    // until something can contradict it. A session on disk is authoritative
+    // either way, and the local value is dropped.
+    const keep = pending !== null && next.sessionOnDisk !== true;
+    if (!keep) planPendingRef.current = null;
+    const merged = keep ? { ...next, planMode: pending } : next;
+    stateRef.current = merged;
+    setState(merged);
   }, []);
 
   const loadSession = useCallback(
@@ -133,7 +177,11 @@ export function useComposerState({ sessionPath, projectId }: ComposerSource): Co
     setState(null);
     setModelsLoading(false);
     if (sessionPath !== null) {
-      void loadSession(sessionPath, false);
+      // A draft is a placeholder path: it is the identity this state is held
+      // under (so a `/plan` typed before the session exists has somewhere to
+      // live), but there is no session to ask about yet. The real path replaces
+      // it a moment later and the load happens then.
+      if (!isDraftSession(sessionPath)) void loadSession(sessionPath, false);
       return;
     }
     if (projectId !== null) {
@@ -265,6 +313,81 @@ export function useComposerState({ sessionPath, projectId }: ComposerSource): Co
     [sessionPath, apply],
   );
 
+  /** Record an authoritative plan-mode answer, dropping any local one. */
+  const applyPlan = useCallback(
+    (active: boolean): void => {
+      const path = sessionPath;
+      if (path === null || sourceRef.current !== path) return;
+      const current = stateRef.current;
+      if (current === null) {
+        // No read has landed yet (a draft, or a switch before the first read):
+        // the value waits as the pending one, which the next read cannot
+        // contradict — see `apply`.
+        planPendingRef.current = active;
+        return;
+      }
+      planPendingRef.current = null;
+      apply(path, { ...current, planMode: active });
+    },
+    [sessionPath, apply],
+  );
+
+  const selectPlan = useCallback(
+    async (active: boolean): Promise<void> => {
+      const path = sessionPath;
+      // Plan mode belongs to a session that exists; the hero has nowhere to put
+      // it and shows no control for it either.
+      if (path === null) throw new Error("no session to switch");
+      // Deliberately not swallowed into a notice: the only caller is the plan
+      // chip, which says a failed exit beside itself (dsh puts it there too).
+      const { planMode } = await api.setSessionPlan(path, active);
+      // The answer is the process's own view (see the server's `planModeNow`),
+      // so it settles any local value on the spot.
+      applyPlan(planMode);
+    },
+    [sessionPath, applyPlan],
+  );
+
+  /**
+   * Ask the running session what plan mode it holds, and settle on that.
+   *
+   * Called right after a `/plan` command is sent: the command flips a mode the
+   * session file may not be able to record yet (pi writes one lazily), so the
+   * chip must not depend on a read that has nothing to read. A session with no
+   * process yet answers nothing, which is why the value stays local until there
+   * is one — see `markPlan`.
+   */
+  const syncPlan = useCallback(async (): Promise<void> => {
+    const path = sessionPath;
+    if (path === null || isDraftSession(path)) return;
+    try {
+      const { planMode } = await api.getSessionPlan(path);
+      applyPlan(planMode);
+    } catch {
+      // No process to ask: the local value stands, and the session becoming real
+      // is what triggers another ask.
+    }
+  }, [sessionPath, applyPlan]);
+
+  const markPlan = useCallback(
+    (active: boolean): void => {
+      const path = sessionPath;
+      if (path === null || sourceRef.current !== path) return;
+      planPendingRef.current = active;
+      // A draft has no composer read at all — there is nothing to ask — so the
+      // switch is the only thing this state holds until the session is real.
+      const base: ComposerState = stateRef.current ?? {
+        live: false,
+        model: null,
+        models: null,
+        context: null,
+        thinkingLevel: null,
+      };
+      apply(path, { ...base, planMode: active });
+    },
+    [sessionPath, apply],
+  );
+
   /*
    * Memoised on the three things it is built from, so a render of the caller
    * that changed none of them hands back the same object. Without this, every
@@ -274,8 +397,18 @@ export function useComposerState({ sessionPath, projectId }: ComposerSource): Co
    * length of the round trip.
    */
   const value = useMemo(
-    () => ({ state: shown, modelsLoading, ensureLive, selectModel, selectThinking, selectPreset }),
-    [shown, modelsLoading, ensureLive, selectModel, selectThinking, selectPreset],
+    () => ({
+      state: shown,
+      modelsLoading,
+      ensureLive,
+      selectModel,
+      selectThinking,
+      selectPreset,
+      selectPlan,
+      markPlan,
+      syncPlan,
+    }),
+    [shown, modelsLoading, ensureLive, selectModel, selectThinking, selectPreset, selectPlan, markPlan, syncPlan],
   );
 
   return value;

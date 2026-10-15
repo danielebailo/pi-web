@@ -134,6 +134,42 @@ export function parseBuiltinCommand(
 }
 
 /**
+ * The name when `text` is a `/command` this composition registered as an
+ * **extension** command, or null for everything else.
+ *
+ * Extension commands are the third kind of slash text, and the only one that
+ * needs a caller to know what it is: pi consumes the command and records only
+ * the message the command itself submits, so the composer must not draw the
+ * typed line as a user turn (see `useConversation.runCommand`). Built-ins are
+ * answered by `parseBuiltinCommand`, and skills and templates are expanded by pi
+ * into ordinary prompts, which is why neither appears here.
+ */
+export function extensionCommandName(text: string, commands: SlashCommand[]): string | null {
+  const match = /^\/([^\s/]+)(?:\s+[\s\S]*)?$/.exec(text.trim());
+  if (!match) return null;
+  const name = match[1] ?? "";
+  if (name.length === 0) return null;
+  return commands.some((command) => command.source === "extension" && command.name === name)
+    ? name
+    : null;
+}
+
+/**
+ * The mode `/plan` asks for, or null when the text is not that command.
+ *
+ * `true` is "enter", `false` is the exact `/plan off`, and a `/plan <message>`
+ * is an enter with a request behind it. It lives here rather than inline at each
+ * sender because the command belongs to this deployment — a new session's first
+ * message and an established one's both have to agree about what it is, and the
+ * hero sending it as plain text used to leave a turn nothing ever wrote.
+ */
+export function planCommandOf(text: string): boolean | null {
+  const trimmed = text.trim();
+  if (!/^\/plan(\s+[\s\S]*)?$/.test(trimmed)) return null;
+  return !/^\/plan\s+off\s*$/.test(trimmed);
+}
+
+/**
  * The name of a slash command nothing in this composition registered.
  *
  * Returns null for everything that is not a bare `/name`: ordinary prose such as

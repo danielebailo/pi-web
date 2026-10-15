@@ -36,6 +36,10 @@ beforeAll(async () => {
   await writeFile(join(root, "sheet.xlsx"), Buffer.from([0x50, 0x4b, 0x03, 0x04]));
   await writeFile(join(root, "blob.dat"), Buffer.from([0x41, 0x00, 0x42]));
   await writeFile(join(root, "pixel.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  await writeFile(join(root, "icon.svg"), "<svg/>", "utf8");
+  // Past the image cap but well inside the pdf one: the two formats do not share
+  // a budget, and a picture must not be allowed to reach the larger of them.
+  await writeFile(join(root, "huge.png"), Buffer.alloc(IMAGE_LIMIT + 1));
   await writeFile(join(root, "huge.txt"), "x".repeat(TEXT_LIMIT + 10), "utf8");
   // Fixtures for paging: more lines than one page may carry, more bytes than one
   // page may carry with no newline at all, and a file whose byte budget lands
@@ -244,6 +248,43 @@ describe("readWorkspaceTextPage", () => {
     expect(page).toMatchObject({ offset: page.size, nextOffset: page.size, text: "", lines: 0, eof: true });
   });
 
+  it("lands on a line-addressed page in one request, with lead-in above it", async () => {
+    // Line 2100 of a 5000-line file: the server scans to 1900 (the 200 lines of
+    // context a reader can scroll back into) and answers with that page, so the
+    // client does not have to walk 2000-line pages to get there.
+    const page = await readWorkspaceTextPage(root, "lines.txt", 0, 2100);
+    expect(page.startLine).toBe(1900);
+    expect(page.text.startsWith("line 1900\n")).toBe(true);
+    expect(page.lines).toBe(TEXT_PAGE_LINES);
+    expect(page.text.includes("line 2100\n")).toBe(true);
+    expect(page.eof).toBe(false);
+  });
+
+  it("clamps the lead-in at the start of the file", async () => {
+    const page = await readWorkspaceTextPage(root, "lines.txt", 0, 201);
+    expect(page.startLine).toBe(1);
+    expect(page.text.startsWith("line 1\n")).toBe(true);
+  });
+
+  it("ignores the line on a later page, which walks by offset", async () => {
+    const first = await readWorkspaceTextPage(root, "lines.txt", 0, 201);
+    const second = await readWorkspaceTextPage(root, "lines.txt", first.nextOffset, 2100);
+    expect(second.startLine).toBeUndefined();
+    expect(second.text.startsWith(`line ${String(TEXT_PAGE_LINES + 1)}\n`)).toBe(true);
+  });
+
+  it("answers a line past the end with the last one", async () => {
+    const page = await readWorkspaceTextPage(root, "lines.txt", 0, 99_999);
+    // The file ends in a newline, so its last line is the empty one after it.
+    expect(page.startLine).toBe(5001);
+    expect(page.text).toBe("");
+    expect(page.eof).toBe(true);
+  });
+
+  it("carries no startLine for an ordinary read", async () => {
+    expect((await readWorkspaceTextPage(root, "lines.txt", 0)).startLine).toBeUndefined();
+  });
+
   it("refuses a binary file on the first page", async () => {
     await expect(readWorkspaceTextPage(root, "blob.dat", 0)).rejects.toThrow(/二进制/);
   });
@@ -272,6 +313,19 @@ describe("readWorkspaceRaw", () => {
   it("refuses a format with no built-in viewer", async () => {
     await expect(readWorkspaceRaw(root, "README.md")).rejects.toThrow(/没有内置查看器/);
     await expect(readWorkspaceRaw(root, "blob.dat")).rejects.toThrow(/没有内置查看器/);
+  });
+
+  it("hands an image over too, so an `<img>` can decode it itself", async () => {
+    const png = await readWorkspaceRaw(root, "pixel.png");
+    expect(png.mimeType).toBe("image/png");
+    expect(png.size).toBe(4);
+    // SVG included: a picture is a picture wherever it is drawn from, and the
+    // hover preview needs a URL for every one of them.
+    expect((await readWorkspaceRaw(root, "icon.svg")).mimeType).toBe("image/svg+xml");
+  });
+
+  it("holds an image to the image cap rather than the pdf one", async () => {
+    await expect(readWorkspaceRaw(root, "huge.png")).rejects.toThrow(/文件过大/);
   });
 
   it("refuses to read outside the project through a symlink", async () => {

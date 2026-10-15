@@ -54,6 +54,15 @@ export interface AskUserIntent {
   kind: "plan-review";
   /** The option label that approves the plan; every other option declines it. */
   approve: string;
+  /**
+   * The tool invocation that submitted the plan, when there is one.
+   *
+   * It is what lets a client reopen the *logged* plan after the review closes
+   * (dsh carries the same field for the same reason). A review with no
+   * invocation — a temporary request made by an extension directly — has none,
+   * and then the plan lives only in this request.
+   */
+  callId?: string;
 }
 
 /** One question in a batch. */
@@ -234,7 +243,14 @@ function readIntent(raw: unknown): AskUserIntent | undefined {
   const item = raw as Record<string, unknown>;
   if (item.kind !== "plan-review") return undefined;
   if (typeof item.approve !== "string" || item.approve.length === 0) return undefined;
-  return { kind: "plan-review", approve: item.approve };
+  const callId = readOptionalString(item.callId);
+  return {
+    kind: "plan-review",
+    approve: item.approve,
+    // A `callId` of the wrong shape is dropped rather than rejecting the tag: it
+    // is a pointer to the logged plan, not part of the decision.
+    ...(typeof callId === "string" && callId.length > 0 ? { callId } : {}),
+  };
 }
 
 function readOptions(raw: unknown): AskUserOption[] | null {

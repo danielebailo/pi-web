@@ -5,6 +5,17 @@
   min-height: 0;
   /* The hero's floating sidebar toggle positions against this column. */
   position: relative;
+  /*
+   * The shared width axis (dsh's `--dsh-chat-content-width`): the resolved
+   * user preference when one exists, else the adaptive default — 64% of the
+   * measured pane width clamped to dsh's 680/920 bounds. The width strips
+   * publish the live measurement and the dragged preference onto this
+   * element; the transcript column and composer clamp against the axis.
+   */
+  --conversation-content-width: var(
+    --conversation-user-width,
+    clamp(680px, calc(var(--conversation-column-width, 0px) * 0.64), 920px)
+  );
 }
 
 .header {
