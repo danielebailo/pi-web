@@ -4,7 +4,7 @@ import { StateDot } from "../../components/StateDot.tsx";
 import type { ToolCallBlock } from "../../lib/types.ts";
 import { DisclosureRow } from "./DisclosureRow.tsx";
 import { useDisclosureOpen } from "./use-disclosure-open.ts";
-import { TodoList, StatusGlyph } from "./TodoList.tsx";
+import { TodoList, DetailMark } from "./TodoList.tsx";
 import {
   parseTodoSnapshot,
   rowSummary,
@@ -118,9 +118,10 @@ export function TodoRow({
 
 /**
  * The expanded diff card: caption, changed rows with their marks, then the
- * untouched ones folded away. A row's status glyph stays for kept rows (a moved
- * row shows no mark at all — dsh reports it through the label, not the art),
- * while added and removed rows trade the glyph for the mark.
+ * untouched ones folded away. Rows are dsh's detail rows: a `+` or `−` for a row
+ * that appeared or went away, a check or play icon for one that stayed, a hollow
+ * square for one that has not started — and the status spelled out at the far
+ * end, which is where dsh names it rather than in the mark.
  */
 function TodoDiffList({ diff, todos }: { diff: TodoDiff; todos: readonly TodoItem[] }) {
   const t = useT();
@@ -152,24 +153,22 @@ function DiffRow({ item }: { item: TodoDiffItem }) {
       data-status={item.status}
       data-change={item.change ?? undefined}
     >
-      <span
-        className={styles.glyph}
-        role={item.change === null ? undefined : "img"}
-        aria-label={item.change === null ? undefined : item.changeLabel}
-        aria-hidden={item.change === null ? true : undefined}
-      >
+      {/* dsh labels the mark with the change when there is one, the status
+          otherwise — both already words in this project's model. */}
+      <span className={styles.glyph} role="img" aria-label={item.changeLabel}>
         {item.change === "added" || item.change === "removed" ? (
           <span className={styles.diffMark}>{item.change === "added" ? "+" : "−"}</span>
         ) : (
-          <StatusGlyph status={item.status} />
+          <DetailMark status={item.status} />
         )}
       </span>
       <span className={styles.content}>{item.content}</span>
-      {item.previousStatusLabel !== undefined ? (
-        <span className={styles.statusChange}>
-          {item.previousStatusLabel} → {statusLabel}
-        </span>
-      ) : null}
+      <span className={styles.statusChange}>
+        {item.previousStatusLabel !== undefined ? `${item.previousStatusLabel} → ` : null}
+        {statusLabel}
+        {/* A row that only moved keeps its status word, with the move appended. */}
+        {item.change === "moved" ? ` · ${item.changeLabel}` : null}
+      </span>
     </li>
   );
 }

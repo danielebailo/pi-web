@@ -285,7 +285,9 @@ const GLYPHS = {
   },
   /**
    * IconChecklistOutline14 — dsh's `ic_checklist_outline_14`: two rings over two
-   * list bars. Titles both the todo row and the plan panel above the composer.
+   * list bars, drawn as filled geometry. Titles the transcript's todo row (the
+   * rightbar's files pane draws it too); the plan panel's header draws
+   * `checklistOutline` below, because that is the mark dsh's own panel uses.
    */
   checklist: {
     viewBox: "0 0 14 14",
@@ -294,6 +296,24 @@ const GLYPHS = {
       "M13.3277 2.97256V4.25225H7.28086V2.97256H13.3277Z",
       "M4.64512 10.336C4.64505 9.62755 4.07081 9.05322 3.3623 9.05322C2.65386 9.05329 2.07956 9.62759 2.07949 10.336C2.07949 11.0445 2.65382 11.6188 3.3623 11.6188C4.07085 11.6188 4.64512 11.0446 4.64512 10.336ZM5.92559 10.336C5.92559 11.7515 4.77777 12.8993 3.3623 12.8993C1.94689 12.8993 0.799805 11.7515 0.799805 10.336C0.799871 8.92066 1.94693 7.7736 3.3623 7.77354C4.77773 7.77354 5.92552 8.92062 5.92559 10.336Z",
       "M4.64531 3.6123C4.6453 2.90382 4.07098 2.32949 3.3625 2.32949C2.65403 2.32951 2.0797 2.90383 2.07969 3.6123C2.07969 4.32079 2.65402 4.8951 3.3625 4.89512C4.07099 4.89512 4.64531 4.3208 4.64531 3.6123ZM5.925 3.6123C5.925 5.02772 4.77792 6.1748 3.3625 6.1748C1.9471 6.17479 0.8 5.02771 0.8 3.6123C0.800013 2.19691 1.9471 1.04982 3.3625 1.0498C4.77791 1.0498 5.92499 2.1969 5.925 3.6123Z",
+    ],
+  },
+
+  /**
+   * `IconChecklistOutlineRegular` — the same mark as dsh draws it in the plan
+   * panel's header: a 16px artboard stroked at one pixel, so the rings read as
+   * outlines instead of filled shapes. `strokeLinecap: "butt"` is dsh's default
+   * rather than a detail — round caps push both rules half a pixel past 13.5.
+   */
+  checklistOutline: {
+    viewBox: "0 0 16 16",
+    strokeWidth: 1,
+    strokeLinecap: "butt",
+    paths: [
+      "M3.75 6.25C4.7165 6.25 5.5 5.4665 5.5 4.5C5.5 3.5335 4.7165 2.75 3.75 2.75C2.7835 2.75 2 3.5335 2 4.5C2 5.4665 2.7835 6.25 3.75 6.25Z",
+      "M7.5 4.5H13.5",
+      "M3.75 13.25C4.7165 13.25 5.5 12.4665 5.5 11.5C5.5 10.5335 4.7165 9.75 3.75 9.75C2.7835 9.75 2 10.5335 2 11.5C2 12.4665 2.7835 13.25 3.75 13.25Z",
+      "M7.5 11.5H13.5",
     ],
   },
 
@@ -486,12 +506,28 @@ const GLYPHS = {
   },
 
   /**
-   * `IconCheckOutline16` — the view-options menu's trailing selection mark.
+   * `IconCheckOutline16` — the view-options menu's trailing selection mark, and
+   * the todo details card's mark for a finished task.
    */
   check: {
     viewBox: "0 0 16 16",
     strokeWidth: 1,
+    strokeLinecap: "butt",
     paths: ["M2.25 8.5L5.49732 11.7473C5.90519 12.1552 6.57263 12.1344 6.95426 11.7018L13.75 4"],
+  },
+
+  /**
+   * `IconPlayOutline16` — the todo details card's mark for the task that is
+   * running: a ring with the play triangle drawn inside it.
+   */
+  play: {
+    viewBox: "0 0 16 16",
+    strokeWidth: 1,
+    strokeLinecap: "butt",
+    paths: [
+      "M8 14.5C11.5899 14.5 14.5 11.5899 14.5 8C14.5 4.41015 11.5899 1.5 8 1.5C4.41015 1.5 1.5 4.41015 1.5 8C1.5 11.5899 4.41015 14.5 8 14.5Z",
+      "M10.3329 7.91346C10.3996 7.95195 10.3996 8.04818 10.3329 8.08667L6.78304 10.1362C6.71638 10.1747 6.63304 10.1266 6.63304 10.0496L6.63304 5.95055C6.63304 5.87357 6.71638 5.82546 6.78304 5.86395L10.3329 7.91346Z",
+    ],
   },
 } as const satisfies Record<string, GlyphDef>;
 

@@ -3,9 +3,11 @@
  * the composer — dsh renders the same list in both places, and one implementation
  * is what keeps them from drifting apart.
  *
- * The glyph colours and the 16px cell are dsh's `TodoPanel.module.css`, kept at
- * dsh's own sizes rather than the content font tokens: the panel is chrome that
- * frames the conversation, not part of it.
+ * The 13px/20px line and both mark sets are dsh's, kept at its own numbers rather
+ * than the content font tokens: the panel is chrome that frames the conversation,
+ * not part of it. Which set a surface draws is `data-marks`, set by the caller:
+ * the panel takes `stateDot`, the transcript's details card takes the default
+ * `details`.
  */
 
 .list {
@@ -44,28 +46,150 @@
   height: 16px;
 }
 
-.glyphCompleted {
+/*
+ * The details card's rows are dsh's `.item` around its `.heading`: no list gap,
+ * each row carrying its own 10px/14px inset and a hairline above every row but
+ * the first, which is what puts dsh's details card at 41px a line against the
+ * panel's 28. Inside the row it is the heading's 8px gap and a 14×18 mark slot
+ * pinned to the top of the line, with the status word pushed to the far end. The
+ * panel above keeps the 16px cell, the 10px gap and the 8px list gap, which is
+ * what dsh's panel uses — the two surfaces really do draw different rows.
+ */
+.list[data-marks="details"] {
+  gap: 0;
+}
+
+.list[data-marks="details"] .item {
+  /* dsh's `.heading` aligns on the baseline, which is what puts the 12px status
+     word on the same baseline as the 13px subject — and what makes the row 41px
+     rather than 40. */
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 14px;
+}
+
+.list[data-marks="details"] .item + .item {
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
+}
+
+/* dsh's `.status` pins the mark to the top of the line: it is the tallest thing
+   in the row, and letting it ride the baseline would drag the line down. */
+.list[data-marks="details"] .glyph {
+  align-self: flex-start;
+  width: 14px;
+  height: 18px;
+}
+
+/* dsh `.statusText`: the status word, spelled out at the far end of the row. */
+.statusText {
+  margin-inline-start: auto;
+  flex: none;
+  color: var(--dsw-alias-label-caption);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/*
+ * The unstarted task's mark: dsh's `.pending`, a hollow square rather than the
+ * panel's filled dot.
+ */
+.pending {
+  box-sizing: border-box;
+  width: 10px;
+  height: 10px;
+  border: 1px solid var(--dsw-alias-label-tertiary);
+  border-radius: 2px;
+}
+
+/*
+ * The plan panel's marks: dsh's `StateDot`, token for token. A solid state keeps
+ * the 10px layout slot and paints a 6px core inside it, so the row's text never
+ * moves between statuses; only the running task grows to the full 14px ring.
+ */
+.dot {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: 10px;
+  height: 10px;
+  color: var(--dsw-alias-state-idle-primary);
+}
+
+.dot[data-state="done"] {
   color: var(--dsw-alias-state-success-primary);
 }
 
-.glyphPending {
-  color: var(--dsw-alias-label-caption);
+.dot::after {
+  content: "";
+  position: absolute;
+  inset: 20%;
+  border-radius: 50%;
+  corner-shape: round;
+  background: currentColor;
 }
 
-.glyphProgress {
-  color: var(--dsw-alias-state-business-primary);
-  animation: todo-progress-spin 1s linear infinite;
+/* Ongoing is the one non-dot state: a quiet full ring behind a centered arc that
+   breathes while the whole glyph rotates. Both share dsh's 1.5s period. */
+.spinner {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
 }
 
-@keyframes todo-progress-spin {
+.spinnerMotion {
+  transform-origin: center;
+  animation: todo-state-dot-spin 1.5s linear infinite;
+}
+
+.spinnerTrack,
+.spinnerArc {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.spinnerTrack {
+  opacity: 0.25;
+}
+
+.spinnerArc {
+  stroke-dasharray: 12 150;
+  animation: todo-state-dot-dash 1.5s ease-in-out infinite;
+}
+
+@keyframes todo-state-dot-spin {
   to {
     transform: rotate(360deg);
   }
 }
 
+@keyframes todo-state-dot-dash {
+  0% {
+    stroke-dasharray: 12 150;
+    stroke-dashoffset: 0;
+  }
+
+  50% {
+    stroke-dasharray: 24 150;
+    stroke-dashoffset: -6;
+  }
+
+  100% {
+    stroke-dasharray: 12 150;
+    stroke-dashoffset: 0;
+  }
+}
+
+/* The panel's marks stop moving too, and the arc settles as a fixed 18-unit dash. */
 @media (prefers-reduced-motion: reduce) {
-  .glyphProgress {
+  .spinnerMotion,
+  .spinnerArc {
     animation: none;
+  }
+
+  .spinnerArc {
+    stroke-dasharray: 18 150;
+    stroke-dashoffset: -3;
   }
 }
 

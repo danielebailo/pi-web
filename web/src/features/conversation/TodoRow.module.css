@@ -101,9 +101,12 @@
   display: flex;
   flex-direction: column;
   margin: 4px 0 4px 4px;
-  padding: 12px 16px;
+  /* No padding of its own: dsh's card is a caption and a stack of rows, each
+     carrying its own 14px inset, which is what lets the dividers run edge to
+     edge. The corners are the shared `--dsw-radius-lg` dsh rounds every details
+     card to, not the 12px this card used. */
   border: 0.5px solid var(--dsw-alias-border-l1);
-  border-radius: 12px;
+  border-radius: var(--dsw-radius-lg);
   background: var(--dsw-alias-markdown-code-block);
   /* The expanded card shows the call's whole snapshot, so it gets the same
      output budget as every other tool card rather than the panel's tighter strip. */
@@ -111,6 +114,8 @@
 }
 
 .empty {
+  /* dsh shares the row's inset with the empty line. */
+  padding: 10px 14px;
   font-size: var(--dsh-content-font-size-secondary, 13px);
   line-height: 20px;
   color: var(--dsw-alias-label-caption);
@@ -135,11 +140,15 @@
 .diff {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  /* Caption and rows butt up: the caption's bottom pad and the first row's top
+     pad are the whole gap between them, the way dsh stacks them. */
+  gap: 0;
 }
 
 .diffCaption {
-  font-size: var(--dsh-content-font-size-secondary, 13px);
+  padding: 10px 14px 6px;
+  /* dsh sets the caption one rung under the rows: 12px against their 13px. */
+  font-size: 12px;
   line-height: 20px;
   color: var(--dsw-alias-label-caption);
 }
@@ -147,7 +156,8 @@
 .diffList {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  /* Divided rows, not spaced ones. */
+  gap: 0;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -157,30 +167,45 @@
   --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }
 
-/* Same row geometry as TodoList's, since the two lists read side by side. */
+/* dsh's details row: the card's 14px inset, an 8px gap and a 14×18 mark slot
+   pinned to the top of the line, so the mark sits flush left inside the inset
+   and the text starts 36px in. */
 .diffItem {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  /* dsh's `.heading` aligns on the baseline, which is what puts the 12px status
+     word on the same baseline as the 13px subject — and what makes the row 41px
+     rather than 40. */
+  align-items: baseline;
+  gap: 8px;
   min-width: 0;
+  padding: 10px 14px;
   font-size: 13px;
   line-height: 20px;
   color: var(--dsw-alias-label-secondary);
 }
 
-.diffItem .glyph {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 16px;
-  height: 16px;
+/* dsh's `.item + .item`. */
+.diffItem + .diffItem {
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
 }
 
-/* Added and removed rows trade the status glyph for the mark, coloured. */
+/* dsh's `.status` pins the mark to the top of the line: it is the tallest thing
+   in the row, and letting it ride the baseline would drag the line down. */
+.diffItem .glyph {
+  display: inline-flex;
+  flex: none;
+  align-self: flex-start;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 18px;
+}
+
+/* Added and removed rows trade the status icon for the mark, coloured; the 16px
+   face and 18px line are dsh's `.status`, which is also what centres them. */
 .diffMark {
-  font-size: 14px;
-  line-height: 1;
-  font-weight: 500;
+  font-size: 16px;
+  line-height: 18px;
 }
 
 .diffItem[data-change="added"] .diffMark {
@@ -192,37 +217,40 @@
 }
 
 .diffItem[data-change="removed"] .content {
-  color: var(--dsw-alias-label-caption);
+  color: var(--dsw-alias-label-tertiary);
   text-decoration: line-through;
-  text-decoration-color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 55%, transparent);
 }
 
+/* dsh gives the subject `flex: 1`, which is what pushes the status word out. */
 .diffItem .content {
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* The old status a write replaced, read after the row it belongs to. */
+/* dsh `.statusText`: every row ends with the status word, and a row whose status
+   moved reads `old → new` while a moved row appends what happened to it. */
 .statusChange {
   flex: none;
-  margin-left: 6px;
+  margin-inline-start: auto;
   font-size: 12px;
   line-height: 20px;
   color: var(--dsw-alias-label-caption);
-  font-variant-numeric: tabular-nums;
 }
 
-/* Untouched rows fold away under their count line. */
+/* Untouched rows fold away under their count line, behind dsh's own hairline.
+   The summary keeps the platform's disclosure marker: dsh draws a chevron of
+   its own, and this card has no icon to draw. */
+.unchanged {
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
+}
+
 .unchanged summary {
+  padding: 9px 14px;
   font-size: var(--dsh-content-font-size-secondary, 13px);
   line-height: 20px;
   color: var(--dsw-alias-label-caption);
   cursor: pointer;
-}
-
-.unchanged[open] summary {
-  margin-bottom: 8px;
 }

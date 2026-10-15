@@ -1,27 +1,53 @@
 /*
  * The plan strip above the composer, ported from dsh's `TodoPanel.module.css`.
+ * `PendingQuestions` imports this module too: to the reader both strips are "the
+ * session still has something for you", stacked in the same seat, so they are
+ * one surface on purpose.
  *
- * Geometry, in dsh's terms: the card is the composer's card width minus four
- * dock insets (8px each), which lands 16px in from the input card on both sides,
- * and it sits directly on the composer's own top padding. Nothing here reads the
- * content font tokens — the panel is chrome framing the conversation, and dsh
- * pins it at 13px for the same reason.
+ * Geometry, in dsh's terms: the composer card is the content width plus 32px (the
+ * dock clearance on both sides) and the strip is that card minus the same 32px,
+ * so it lands 16px in from the input card on both sides — kept as a `width` as
+ * well as a `max-width` so the inset holds on a narrow window, where the card is
+ * held back by its own gutter and a bare cap would go flush. dsh also stacks the
+ * strip and the input card in one column with a 6px gap
+ * (`--dsh-composer-stack-gap`); nothing here carries a top padding of its own,
+ * so the 6px under the strip is that gap. Nothing here reads the content font
+ * tokens — the panel is chrome framing the conversation, and dsh pins it at 13px
+ * for the same reason.
  */
 
 .dock {
   flex: 0 0 auto;
-  padding: 0 24px;
+  /* The clearance the composer's own gutter uses (dsh's
+     `--dsh-composer-side-clearance`): the dock pads it, the strip subtracts its
+     16px inset from each side of that, and the strip lands at the card − 32px at
+     every width. */
+  padding: 0 16px;
+  /* dsh's `--dsh-composer-stack-gap`, between the strip and the input card. */
+  margin-bottom: 6px;
 }
 
 .root {
   box-sizing: border-box;
   overflow: hidden;
   margin: 0 auto;
-  /* 780px composer card − 2 × 16px inset. */
-  max-width: 748px;
-  border: 0.5px solid var(--dsw-alias-border-l1);
-  border-radius: 12px;
-  background: var(--dsw-specific-tip);
+  /* The composer card − 16px of dock inset on each side, which is the content
+     width itself, now that the card is that width plus 32px. */
+  width: calc(100% - 32px);
+  max-width: var(--conversation-content-width, 780px);
+  /*
+   * dsh's menu surface. No layout border: the hairline is the elevation stroke,
+   * rebound one rung lighter the way every menu surface here rebinds it, and the
+   * lift is the panel tier rather than the float the popovers use. dsh layers
+   * `backdrop-filter: var(--dsw-menu-backdrop-filter)` over this surface as
+   * well; this theme has no such token and its menu fill is opaque, so the blur
+   * would have nothing to show through.
+   */
+  border: 0;
+  --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);
+  border-radius: var(--dsw-radius-lg);
+  background: var(--dsw-specific-menu);
+  box-shadow: var(--dsw-elevation-panel);
 }
 
 .body {

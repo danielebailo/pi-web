@@ -44,17 +44,22 @@ export function TodoPanel({ todos }: { todos: readonly TodoItem[] }) {
             onClick={() => setCollapsed((value) => !value)}
           >
             <span className={styles.lead} aria-hidden>
-              <Glyph name="checklist" />
+              <Glyph name="checklistOutline" />
             </span>
             <span className={styles.title}>{t("todo.title")}</span>
             {/* The counts are chrome: the reader who cares about which task is
                 running is one click away from the rows themselves. */}
             <span className={styles.progress}>{progressLabel(summarizeTodos(todos), t)}</span>
+            {/* dsh discloses with its outline chevron, up while the list is
+                closed. Turning the down one 180° is the same eight points
+                mirrored, so the collapsed mark is identical rather than close. */}
             <span className={styles.chevron} aria-hidden>
-              <Glyph name="chevronDown" className={collapsed ? styles.chevronCollapsed : undefined} />
+              <Glyph name="chevronDownOutline" className={collapsed ? styles.chevronCollapsed : undefined} />
             </span>
           </button>
-          {collapsed ? null : <TodoList todos={todos} completedLimit={PANEL_COMPLETED_LIMIT} />}
+          {collapsed ? null : (
+            <TodoList todos={todos} completedLimit={PANEL_COMPLETED_LIMIT} marks="stateDot" />
+          )}
         </div>
       </section>
     </div>

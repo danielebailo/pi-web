@@ -1,33 +1,81 @@
 /*
- * The queued-messages strip above the composer, modeled on dsh's
- * `QueueDock.module.css` by way of this project's TodoPanel strip.
+ * The queued-messages strip above the composer, ported from dsh's
+ * `QueueDock.module.css`.
  *
- * Same seat as the plan strip — composer card width minus two 16px insets,
- * sitting directly above the input card — so the two stack as sibling chrome
- * of the input they both steer. 13px text throughout: the panel is chrome
- * framing the conversation, not part of it.
+ * dsh hangs this one off the input card rather than floating it the way the plan
+ * strip above it floats: the dock insets the same 16px a side, but the panel
+ * keeps only its top corners and drops its bottom border, and the dock tucks 3px
+ * under the card — the strip and the input read as one attached surface. The
+ * 6px above it comes from whatever strip precedes it, as it does in dsh's
+ * composer stack. 13px text throughout: the panel is chrome framing the
+ * conversation, not part of it.
  */
 
 .dock {
   flex: 0 0 auto;
-  padding: 0 24px;
+  /* The same clearance as the strip above and the composer's own gutter. */
+  padding: 0 16px;
+  /* dsh cancels the composer-stack gap here and then tucks 3px further under the
+     input card (`calc(0px - gap - 3px)`). This column has no gap to cancel, so
+     only the 3px is left. */
+  margin-bottom: -3px;
 }
 
 .root {
+  position: relative;
+  isolation: isolate;
   box-sizing: border-box;
+  overflow: hidden;
   margin: 0 auto;
-  /* 780px composer card − 2 × 16px inset. */
-  max-width: 748px;
-  padding: 6px 12px;
-  border: 0.5px solid var(--dsw-alias-border-l1);
-  border-radius: 12px;
-  background: var(--dsw-specific-tip);
+  /* The composer card − 16px of dock inset on each side, which is the content
+     width itself. */
+  width: calc(100% - 32px);
+  max-width: var(--conversation-content-width, 780px);
+  /* No vertical padding to speak of: the header carries its own, and the strip's
+     open bottom edge is closed by the input card it sits on. */
+  padding: 2px 0;
+  border-radius: var(--dsw-radius-lg) var(--dsw-radius-lg) 0 0;
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }
 
+/*
+ * The menu surface, one layer down, so the hairline can sit over it without
+ * eating into the rows. dsh layers `backdrop-filter: var(--dsw-menu-backdrop-
+ * filter)` here too; this theme has no such token and its menu fill is opaque,
+ * so the blur would have nothing to show through.
+ */
+.root::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--dsw-specific-menu);
+  content: "";
+  pointer-events: none;
+}
+
+/* The input card's own top border closes the shape below. */
+.root::after {
+  position: absolute;
+  inset: 0;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-bottom: none;
+  border-radius: inherit;
+  content: "";
+  pointer-events: none;
+}
+
+/* dsh's `.header`, minus the button: this dock does not collapse. */
 .title {
+  box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  width: 100%;
+  height: 36px;
+  /* The 12px right inset lines this row up with the plan strip's own header. */
+  padding: 4px 12px;
   margin: 0;
   font-size: 13px;
   line-height: 24px;
@@ -42,18 +90,29 @@
 .rows {
   display: flex;
   flex-direction: column;
-  margin: 4px 0 0;
+  margin: 0;
   padding: 0;
   list-style: none;
+  max-height: 180px;
+  overflow-y: auto;
 }
 
 .row {
+  box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-width: 0;
-  min-height: 28px;
-  padding: 2px 0;
+  gap: 10px;
+  width: 100%;
+  /* Grows with the inline editor's content; the other rows stay 36px. */
+  min-height: 36px;
+  padding: 4px 5px 4px 12px;
+  border-radius: var(--dsw-radius-md);
+}
+
+/* dsh's separator is an inset hairline rather than a border, so it stops short
+   of the panel's rounded edge. */
+.row + .row {
+  box-shadow: inset 0 1px 0 var(--dsw-alias-border-l1);
 }
 
 .row[data-busy] {
@@ -67,12 +126,17 @@
   display: flex;
   flex: none;
   gap: 4px;
+  min-width: 0;
+  max-width: 55%;
+  overflow: hidden;
 }
 
 .thumb {
-  width: 22px;
-  height: 22px;
-  border-radius: 5px;
+  width: 24px;
+  height: 24px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: var(--dsw-radius-xs);
+  background: var(--dsw-alias-bg-base);
   object-fit: cover;
 }
 
@@ -80,19 +144,21 @@
   flex: 1 1 auto;
   overflow: hidden;
   min-width: 0;
-  font-size: 13px;
-  line-height: 20px;
-  color: var(--dsw-alias-label-secondary);
+  font: var(--dsw-font-xs-13);
+  color: var(--dsw-alias-label-primary-dimmed);
   text-overflow: ellipsis;
   white-space: nowrap;
+  word-break: break-word;
 }
 
 .actions {
   display: flex;
   flex: none;
-  gap: 2px;
+  align-items: center;
+  gap: 10px;
   /* Same hover reveal the transcript rows use for their own actions: the
-     buttons exist from the start, they just stay quiet until wanted. */
+     buttons exist from the start, they just stay quiet until wanted. dsh shows
+     them outright; keeping them quiet is this project's call. */
   opacity: 0;
   transition: opacity 120ms ease;
 }
@@ -104,24 +170,27 @@
 
 .iconButton {
   display: grid;
+  flex: none;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: 999px;
+  corner-shape: round;
+  outline-offset: -2px;
   background: transparent;
   color: var(--dsw-alias-label-tertiary);
   cursor: pointer;
 }
 
 .iconButton:hover:not(:disabled) {
-  background: var(--dsw-alias-fill-hover);
-  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
 }
 
 .iconButton:disabled {
   cursor: default;
+  opacity: 0.45;
 }
 
 .editor {

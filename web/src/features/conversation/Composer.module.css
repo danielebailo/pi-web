@@ -8,7 +8,11 @@
      the layout viewport does not shrink when a phone keyboard opens, so
      without this the card sits behind the keys with nothing in the layout to
      say so. The token is 0 at rest and on every desktop. */
-  padding: 0 24px calc(8px + var(--piws-keyboard-inset, 0px));
+  /* dsh's `--dsh-composer-side-clearance`: the gutter the card shares with the
+     strips that stack above it. 16px rather than the 24px this shell used — with
+     the card's max-width at `content + 32px`, the two together are what make the
+     card match dsh's at every window width, not only where its max-width binds. */
+  padding: 0 16px calc(8px + var(--piws-keyboard-inset, 0px));
 }
 
 /* Mirrors dsh's InputBar card: 22px corners, a 12px gap between the input and
@@ -29,9 +33,11 @@
 .composer {
   position: relative;
   box-sizing: border-box;
-  /* The pane's shared width axis, so the input tracks the transcript column
-     the way dsh's composer tracks --dsh-chat-content-width. */
-  max-width: var(--conversation-content-width, 780px);
+  /* dsh's card is the content width plus 32px — the dock clearance kept for the
+     strips that stack above it in the same column, and the room its width handle
+     is drawn in (that handle starts 24px off the content edge, so 8px clear of
+     this card). The pane's shared width axis is the content width itself. */
+  max-width: calc(var(--conversation-content-width, 780px) + 32px);
   margin: 0 auto;
   display: flex;
   flex-direction: column;

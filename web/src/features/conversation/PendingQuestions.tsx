@@ -61,7 +61,9 @@ export function PendingQuestions({
               {t("question.pendingCount", { count: questions.length })}
             </span>
             <span className={styles.chevron} aria-hidden>
-              <Glyph name="chevronDown" className={open ? undefined : styles.chevronCollapsed} />
+              {/* The plan strip's outline chevron: both strips share this module,
+                  so their disclosure marks are the same mark. */}
+              <Glyph name="chevronDownOutline" className={open ? undefined : styles.chevronCollapsed} />
             </span>
           </button>
           {open ? (
