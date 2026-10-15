@@ -1,7 +1,7 @@
 import { translator } from "./i18n/index.ts";
 import { describe, expect, it } from "vitest";
 import {
-  formatMessageTime,
+  formatMessageClock,
   formatRunDuration,
   formatTokens,
   formatTurnDuration,
@@ -94,11 +94,34 @@ describe("formatTokens", () => {
   });
 });
 
-describe("formatMessageTime", () => {
-  it("renders dsh's `9月17日 21:00` shape with zero-padded clock parts", () => {
-    const stamp = new Date(2026, 8, 17, 21, 0).getTime();
-    expect(formatMessageTime(stamp, "zh-CN")).toBe("9月17日 21:00");
-    const early = new Date(2026, 0, 3, 9, 5).getTime();
-    expect(formatMessageTime(early, "zh-CN")).toBe("1月3日 09:05");
+describe("formatMessageClock", () => {
+  // `now` is always passed in: the function's whole job is the comparison, and
+  // a test that read the real clock would change meaning at midnight.
+  it("drops the date while the message is from today", () => {
+    const now = new Date(2026, 8, 17, 23, 30).getTime();
+    expect(formatMessageClock(new Date(2026, 8, 17, 21, 0).getTime(), zh, now)).toBe("21:00");
+    expect(formatMessageClock(new Date(2026, 8, 17, 9, 5).getTime(), zh, now)).toBe("09:05");
+  });
+
+  it("spells the date out once the day has moved on", () => {
+    const now = new Date(2026, 8, 18, 0, 30).getTime();
+    expect(formatMessageClock(new Date(2026, 8, 17, 23, 58).getTime(), zh, now)).toBe("9月17日 23:58");
+  });
+
+  it("adds the year across a year boundary", () => {
+    const now = new Date(2026, 0, 2, 10, 0).getTime();
+    expect(formatMessageClock(new Date(2025, 11, 31, 23, 58).getTime(), zh, now)).toBe(
+      "2025年12月31日 23:58",
+    );
+  });
+
+  it("writes the date in the locale's own shape", () => {
+    const en = translator("en");
+    const thisYear = new Date(2026, 8, 18, 0, 30).getTime();
+    expect(formatMessageClock(new Date(2026, 8, 17, 21, 0).getTime(), en, thisYear)).toBe("9/17 21:00");
+    const nextYear = new Date(2027, 0, 2, 10, 0).getTime();
+    expect(formatMessageClock(new Date(2026, 8, 17, 21, 0).getTime(), en, nextYear)).toBe(
+      "2026-9-17 21:00",
+    );
   });
 });

@@ -12,6 +12,7 @@ import {
   formatLatencySeconds as formatLatencySecondsOf,
   formatTokensPerSecond,
   sessionStats,
+  turnUsage,
 } from "./stats-model.ts";
 
 function user(): UserMessage {
@@ -72,6 +73,58 @@ describe("sessionStats", () => {
       timing({ decodeMs: 2000, decodeTokens: 500 }),
     );
     expect(measured.tokensPerSecond).toBe(250);
+  });
+});
+
+describe("turnUsage", () => {
+  it("sums the turn's buckets across its model calls", () => {
+    const usage = turnUsage([
+      user(),
+      assistant({ input: 1_200, cacheRead: 10_600, cacheWrite: 100, totalTokens: 11_900 }),
+      assistant({ output: 340, totalTokens: 340 }),
+    ]);
+
+    expect(usage).toEqual({
+      input: 1_200,
+      output: 340,
+      cacheRead: 10_600,
+      cacheWrite: 100,
+      totalTokens: 12_240,
+    });
+  });
+
+  it("reads a turn with no usage recorded as having none", () => {
+    const bare: AssistantMessage = { role: "assistant", content: [], timestamp: 0 };
+
+    expect(turnUsage([user(), bare])).toBeNull();
+  });
+
+  it("skips a usage that never recorded a total", () => {
+    // pi records one for every call it bills; a turn whose only numbers are the
+    // four buckets would otherwise report a headline figure the buckets behind
+    // it do not add up to.
+    const noTotal: AssistantMessage = {
+      role: "assistant",
+      content: [],
+      usage: { input: 5, output: 5, cacheRead: 0, cacheWrite: 0 },
+      timestamp: 0,
+    };
+
+    expect(turnUsage([user(), noTotal])).toBeNull();
+  });
+
+  it("counts assistant messages only, not the tool results between them", () => {
+    // A turn's figure is the sum over that turn's assistant messages
+    // (docs/design-notes.md:480). A tool row that ran a summariser is not part
+    // of it — which is also the figure the row showed before it had a panel.
+    const usage = turnUsage([
+      user(),
+      assistant({ output: 10, totalTokens: 10 }),
+      toolResult({ input: 999, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 999 }),
+    ]);
+
+    expect(usage?.totalTokens).toBe(10);
+    expect(usage?.input).toBe(0);
   });
 });
 

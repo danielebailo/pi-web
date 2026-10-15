@@ -161,6 +161,7 @@ export const zhCN = {
   // --- conversation · messages ---------------------------------------------
   "message.fork": "从此处分叉",
   "message.usageTitle": "本轮所有模型调用累加的 token 数（含缓存读取）",
+  "message.turnUsageTitle": "本轮用量",
   "message.usage": "用量 {tokens} tok",
   "message.durationTitle": "从你的消息发出到本轮结束的墙上时间",
   "message.duration": "用时 {duration}",
@@ -212,6 +213,13 @@ export const zhCN = {
   "queue.save": "保存排队消息",
   "queue.cancelEdit": "取消编辑",
   "queue.remove": "删除排队消息",
+
+  // --- transcript · clock ---------------------------------------------------
+  // dsh's `clock.md` / `clock.ymd`: the date half of a message's timestamp, used
+  // only when the message is not from today (an English date is `9/17`, and a
+  // year is written `-`-separated rather than spelled out).
+  "clock.md": "{m}月{d}日",
+  "clock.ymd": "{y}年{m}月{d}日",
 
   // --- conversation · compaction -------------------------------------------
   "compaction.title": "上下文已压缩",
@@ -970,6 +978,7 @@ export const en: Record<MessageKey, string> = {
 
   "message.fork": "Fork from here",
   "message.usageTitle": "Tokens across every model call in this turn, cache reads included",
+  "message.turnUsageTitle": "Turn usage",
   "message.usage": "{tokens} tok used",
   "message.durationTitle": "Wall-clock time from your message to the end of this turn",
   "message.duration": "Took {duration}",
@@ -1020,6 +1029,10 @@ export const en: Record<MessageKey, string> = {
   "queue.save": "Save queued message",
   "queue.cancelEdit": "Cancel editing",
   "queue.remove": "Remove queued message",
+
+  // --- transcript · clock ---------------------------------------------------
+  "clock.md": "{m}/{d}",
+  "clock.ymd": "{y}-{m}-{d}",
 
   "compaction.title": "Context compacted",
   "compaction.before": "{tokens} tok before",

@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Glyph } from "../../components/dsh-icons.tsx";
-import { formatMessageTime, formatTokens } from "../../lib/duration.ts";
-import { useLanguage, useT } from "../../lib/app-state.ts";
+import { useCalendarDay } from "../../lib/calendar-day.ts";
+import { formatMessageClock, formatTokens } from "../../lib/duration.ts";
+import { useT } from "../../lib/app-state.ts";
 import { DisclosureRow } from "./DisclosureRow.tsx";
 import { Markdown } from "./Markdown.tsx";
 import styles from "./CompactionRow.module.css";
@@ -30,7 +31,7 @@ export function CompactionRow({
   timestamp: number;
 }) {
   const t = useT();
-  const language = useLanguage();
+  const day = useCalendarDay();
   const [open, setOpen] = useState(false);
 
   return (
@@ -51,7 +52,7 @@ export function CompactionRow({
           <span className={styles.size}>
             {t("compaction.before", { tokens: formatTokens(tokensBefore) })}
           </span>
-          <span className={styles.time}>{formatMessageTime(timestamp, language)}</span>
+          <span className={styles.time}>{formatMessageClock(timestamp, t, day)}</span>
         </>
       }
     >

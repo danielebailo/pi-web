@@ -1,0 +1,45 @@
+/*
+ * dsh's tooltip bubble (`packages/client/ui-primitives/src/Tooltip.module.css`),
+ * minus the parts that only exist because dsh also prints shortcut keycaps and
+ * pins bubbles on click.
+ *
+ * The bubble is always a body portal, so it takes dsh's portalled z-index rather
+ * than the in-flow one. Placement comes from `tooltip-position.ts` as `left` /
+ * `top` (the box edges), so there is no `translateX(-50%)` here: the math
+ * already centred and clamped the box.
+ */
+.bubble {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  position: fixed;
+  z-index: 1100;
+  width: max-content;
+  max-width: 50vw;
+  padding: 3px 7px;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-tooltip-bg);
+  color: var(--dsw-static-neutral-bluish-00);
+  font-size: 13px;
+  line-height: 20px;
+  white-space: pre-line;
+  overflow-wrap: break-word;
+  pointer-events: none;
+  animation: tooltipIn 150ms var(--ds-ease-in-out);
+}
+
+.label {
+  min-width: 0;
+}
+
+@keyframes tooltipIn {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bubble {
+    animation: none;
+  }
+}

@@ -803,3 +803,161 @@ describe("MessageList mounted window", () => {
     }
   });
 });
+
+/**
+ * Which action rows are visible without being hovered.
+ *
+ * The rule itself is CSS (pinned in `MessageActions.test.tsx`); *which* rows
+ * carry which attribute is decided here, out of the turn's own content. Every
+ * earlier prompt and every earlier turn tail says `hover`; only the newest
+ * prompt and the newest answer say `always`, and an answer that stopped on a
+ * tool call counts as no answer yet.
+ */
+describe("MessageList action-row reveal", () => {
+  const turn = (prompt: string, blocks: ContentBlock[]): AgentMessage[] => [
+    asked(prompt),
+    answered(blocks),
+  ];
+
+  it("keeps a lone turn's prompt and answer in the open", () => {
+    const html = renderToStaticMarkup(
+      <MessageList view={view(turn("你好", [text("在的")]))} cwd={CWD} home="/Users/dev" />,
+    );
+
+    expect(html.match(/data-actions-reveal="always"/g)).toHaveLength(2);
+    expect(html).not.toContain('data-actions-reveal="hover"');
+  });
+
+  it("fades everything but the newest turn once a second one is asked", () => {
+    const html = renderToStaticMarkup(
+      <MessageList
+        view={view([...turn("第一个", [text("好了")]), ...turn("第二个", [text("好了")])])}
+        cwd={CWD}
+        home="/Users/dev"
+      />,
+    );
+
+    // The first prompt and the first tail; the second pair stays open.
+    expect(html.match(/data-actions-reveal="hover"/g)).toHaveLength(2);
+    expect(html.match(/data-actions-reveal="always"/g)).toHaveLength(2);
+  });
+
+  it("holds a turn's cards and its action row in the one container that fades", () => {
+    const html = renderToStaticMarkup(
+      <MessageList
+        view={view([
+          ...turn("改一下", [text("改好了"), wrote(`${CWD}/a.ts`)]),
+          ...turn("第二个", [text("好了")]),
+        ])}
+        cwd={CWD}
+        home="/Users/dev"
+        onOpenChanges={noop}
+      />,
+    );
+
+    // The first turn's attributes, in document order: its prompt, then its
+    // tail. Slicing from the tail to the next attribute gives the tail's own
+    // subtree, so a card and a row both inside it is the proof that hovering
+    // the card reveals the row.
+    const first = html.indexOf('data-actions-reveal="hover"');
+    const tailStart = html.indexOf('data-actions-reveal="hover"', first + 1);
+    const tail = html.slice(tailStart, html.indexOf("data-actions-reveal=", tailStart + 1));
+
+    expect(tail).toContain("data-turn-files");
+    expect(tail).toContain('data-glyph="copy"');
+  });
+
+  it("leaves the newest turn's row on the hover rule when it stopped on a tool call", () => {
+    const html = renderToStaticMarkup(
+      <MessageList
+        view={view(turn("改一下", [text("改好了"), wrote(`${CWD}/a.ts`)]))}
+        cwd={CWD}
+        home="/Users/dev"
+        onOpenChanges={noop}
+      />,
+    );
+
+    // Only the prompt is always-on: there is no answer on screen to copy yet.
+    expect(html.match(/data-actions-reveal="always"/g)).toHaveLength(1);
+    expect(html.match(/data-actions-reveal="hover"/g)).toHaveLength(1);
+  });
+
+  it("still counts an answer the model kept thinking after", () => {
+    const html = renderToStaticMarkup(
+      <MessageList
+        view={view(turn("在吗", [text("在的"), thought("也许该多说一点")]))}
+        cwd={CWD}
+        home="/Users/dev"
+      />,
+    );
+
+    // dsh steps over reasoning when it decides whether a turn ended in a reply:
+    // the text above it is already on screen and already copyable.
+    expect(html.match(/data-actions-reveal="always"/g)).toHaveLength(2);
+    expect(html).not.toContain('data-actions-reveal="hover"');
+  });
+
+  it("leaves the row on hover when a turn has only reasoning, or only blank text", () => {
+    const onlyThought = renderToStaticMarkup(
+      <MessageList view={view(turn("在吗", [thought("先想一下")]))} cwd={CWD} home="/Users/dev" />,
+    );
+    const blank = renderToStaticMarkup(
+      <MessageList view={view(turn("在吗", [text("  ")]))} cwd={CWD} home="/Users/dev" />,
+    );
+
+    for (const html of [onlyThought, blank]) {
+      expect(html.match(/data-actions-reveal="always"/g)).toHaveLength(1);
+      expect(html.match(/data-actions-reveal="hover"/g)).toHaveLength(1);
+    }
+  });
+
+  it("counts a picture, but not a tool call, as the answer", () => {
+    const picture: ContentBlock = { type: "image", data: "aGk=", mimeType: "image/png" };
+    const html = renderToStaticMarkup(
+      <MessageList
+        view={view(turn("画一张", [text("画好了"), picture]))}
+        cwd={CWD}
+        home="/Users/dev"
+      />,
+    );
+
+    // dsh's contract: protocol material is a tool call and reasoning, and any
+    // other block the reader was shown — an image included — is the answer.
+    expect(html.match(/data-actions-reveal="always"/g)).toHaveLength(2);
+    expect(html).not.toContain('data-actions-reveal="hover"');
+  });
+
+  it("draws no tail at all for a prompt nothing has answered", () => {
+    const html = renderToStaticMarkup(
+      <MessageList view={view([asked("在吗")])} cwd={CWD} home="/Users/dev" />,
+    );
+
+    expect(html.match(/data-actions-reveal="always"/g)).toHaveLength(1);
+    expect(html).not.toContain('data-actions-reveal="hover"');
+  });
+
+  it("carries the turn's summed usage onto its answer's row", () => {
+    const answeredWithUsage: AgentMessage = {
+      ...answered([text("好了")]),
+      usage: {
+        input: 1_200,
+        output: 340,
+        cacheRead: 10_600,
+        cacheWrite: 100,
+        totalTokens: 12_240,
+      },
+    };
+    const html = renderToStaticMarkup(
+      <MessageList
+        view={view([asked("第一个"), answeredWithUsage, asked("第二个"), answered([text("好了")])])}
+        cwd={CWD}
+        home="/Users/dev"
+      />,
+    );
+
+    // One pill, on the first turn's row — the figure is the button's visible
+    // label and its accessible name, so it appears twice in the markup.
+    expect(html.match(/用量 12K tok/g)).toHaveLength(2);
+    expect(html.match(/aria-haspopup="dialog"/g)).toHaveLength(1);
+  });
+});

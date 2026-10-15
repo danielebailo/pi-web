@@ -42,6 +42,7 @@ import { transcriptPolicyFor, type TranscriptPolicy } from "./transcript-policy.
 import { StepProcessGroup } from "./StepProcessGroup.tsx";
 import { displayUserText, parseSkillCall, skillCommandLabel } from "./skill-block.ts";
 import { groupTurns, type RailTurn } from "./turn-rail.ts";
+import { turnUsage } from "./stats-model.ts";
 import { planDocsOf, type PlanDoc } from "./plan-docs.ts";
 import { PlanCard } from "./PlanCard.tsx";
 import { textFromContent, type ConversationView, type ToolExecution } from "./useConversation.ts";
@@ -540,6 +541,8 @@ function UserTurn({ content }: { content: string | ContentBlock[] }) {
 interface TurnMeta {
   forkEntryId: string | null;
   usage: MessageUsage | null;
+  /** `provider/model` of the turn's own model calls, or null. */
+  model: string | null;
   durationMs: number | null;
   /** Start of the turn, used for the timestamp label. */
   startedAt: number | null;
@@ -551,11 +554,34 @@ function timestampOf(message: AgentMessage): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function usageOf(message: AgentMessage): MessageUsage | null {
-  const value = (message as { usage?: unknown }).usage;
-  if (typeof value !== "object" || value === null) return null;
-  const total = (value as { totalTokens?: unknown }).totalTokens;
-  return typeof total === "number" ? (value as MessageUsage) : null;
+/**
+ * Whether a turn ends in something the reader can read — dsh's
+ * `endsWithResponse`.
+ *
+ * Only such a turn keeps its action row visible at the end of the transcript.
+ * The last message must be an assistant one (a turn that ended on a tool result
+ * has not answered yet), and the last of its blocks that is neither reasoning
+ * nor a blank placeholder decides: reply text or another kind of block the
+ * reader was shown (an image) is an answer, a trailing tool call is not.
+ */
+function endsWithReply(messages: AgentMessage[]): boolean {
+  const last = messages.at(-1);
+  if (last === undefined || last.role !== "assistant") return false;
+
+  const content = (last as AssistantMessage).content;
+  for (let index = content.length - 1; index >= 0; index -= 1) {
+    const block = content[index];
+    if (block === undefined) continue;
+    // Reasoning is not the answer, and a blank text block is a streaming
+    // placeholder: neither decides, so keep looking backwards.
+    if (block.type === "thinking") continue;
+    if (block.type === "text") {
+      if ((block as TextBlock).text.trim() !== "") return true;
+      continue;
+    }
+    return block.type !== "toolCall";
+  }
+  return false;
 }
 
 /**
@@ -586,13 +612,17 @@ function turnMetadata(
       }
     }
 
-    let total = 0;
-    let sawUsage = false;
+    // A turn's usage is the sum of its model calls, bucket by bucket: the
+    // turn-usage panel reads all four, and a summed `totalTokens` with zeroed
+    // buckets behind it renders as a panel claiming nothing was ever billed.
+    // The model the turn ran on is read off the same messages, because pi can
+    // switch models between turns and the panel sits under this turn's figure.
+    let model: string | null = null;
     for (const message of assistants) {
-      const usage = usageOf(message);
-      if (usage === null) continue;
-      sawUsage = true;
-      total += usage.totalTokens;
+      const assistant = message as AssistantMessage;
+      if (assistant.provider !== undefined && assistant.model !== undefined) {
+        model = `${assistant.provider}/${assistant.model}`;
+      }
     }
 
     // Wall-clock span of the turn. The last message's stamp is when it was
@@ -604,7 +634,8 @@ function turnMetadata(
 
     out.set(group.turn, {
       forkEntryId,
-      usage: sawUsage ? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: total } : null,
+      usage: turnUsage(assistants),
+      model,
       durationMs:
         startedAt !== null && endedAt !== null && endedAt > startedAt ? endedAt - startedAt : null,
       startedAt,
@@ -1328,6 +1359,20 @@ export function MessageList({
           // turn is held back too: pi stamps `stopReason` only when the message
           // assembles, but the retry-shaped logic keeps the two rows symmetric.
           const truncated = isLiveTurn ? null : truncatedAnswerOf(group.messages);
+          // Whether this turn ends in an answer, and whether it has a tail at
+          // all. The tail is drawn as one container because the transcript
+          // reveals a turn's action row by being hovered, which is how dsh's
+          // turn tail behaves (`TurnTailNodeView`).
+          const hasAnswer = group.messages.some((message) => message.role === "assistant");
+          const hasTailFiles = group.turn !== liveTurn && turnFilesByTurn.has(group.turn);
+          const hasTailPlans = group.turn !== liveTurn && plansByTurn.has(group.turn);
+          // The last segment of the conversation keeps its row in the open —
+          // dsh's rule, `endsWithResponse` included: the newest prompt always,
+          // and the newest answer only once the turn has actually ended in one,
+          // so a row does not hang in the open above a turn that is still
+          // working. Every earlier row reveals on hover (`data-actions-reveal`).
+          const revealTail =
+            hasAnswer && endsWithReply(group.messages) && group.turn === lastTurn ? "always" : "hover";
 
           return (
             <div key={group.turn} className={styles.turn} data-turn={group.turn}>
@@ -1343,8 +1388,15 @@ export function MessageList({
                 // and only that one is in pi's file: a queued prompt waiting
                 // further down the group has no entry to branch from yet.
                 const forkEntryId = index === 0 ? (meta?.forkEntryId ?? null) : null;
+                // The newest prompt on screen keeps its row; every earlier one
+                // reveals it on hover. A turn can hold a queued prompt after the
+                // one that opened it, so the row that counts as "newest" is the
+                // last prompt in the last turn — hence the look forward.
+                const newestPrompt =
+                  group.turn === lastTurn &&
+                  !group.messages.slice(index + 1).some((later) => later.role === "user");
                 return (
-                  <div key={key}>
+                  <div key={key} data-actions-reveal={newestPrompt ? "always" : "hover"}>
                     <UserTurn content={content} />
                     <MessageActions
                       align="end"
@@ -1413,29 +1465,36 @@ export function MessageList({
               {/* The turn's own edits, between the answer and the action row —
                   dsh's turn tail, where the card belongs to the turn that
                   caused it rather than to the transcript as a whole, and like
-                  dsh it waits for that turn to end (see `liveTurn`). */}
-              {group.turn !== liveTurn && turnFilesByTurn.has(group.turn) ? (
-                <ChangedFilesCard
-                  files={turnFilesByTurn.get(group.turn) ?? []}
-                  turn={group.turn}
-                  {...(onOpenChanges === undefined ? {} : { onOpenChanges })}
-                />
-              ) : null}
-              {/* The turn's submitted plans, next to its changed files — dsh's
-                  turn tail holds both, and both belong to the turn that caused
-                  them rather than to the tool row that mentioned it. */}
-              {group.turn !== liveTurn && plansByTurn.has(group.turn) ? (
-                <PlanCard plans={plansByTurn.get(group.turn) ?? []} onOpenPlan={onOpenPlan} />
-              ) : null}
-              {group.messages.some((message) => message.role === "assistant") ? (
-                <MessageActions
-                  text={assistantTextOf(group.messages)}
-                  usage={turnMeta.get(group.turn)?.usage ?? null}
-                  durationMs={turnMeta.get(group.turn)?.durationMs ?? null}
-                  timestamp={turnMeta.get(group.turn)?.endedAt ?? null}
-                  forkEntryId={turnMeta.get(group.turn)?.forkEntryId ?? null}
-                  {...(onFork === undefined ? {} : { onFork })}
-                />
+                  dsh it waits for that turn to end (see `liveTurn`). The cards
+                  and the action row share one container so that hovering any of
+                  them reveals the action row, exactly as dsh's tail does. */}
+              {hasTailFiles || hasTailPlans || hasAnswer ? (
+                <div className={styles.turnTail} data-actions-reveal={revealTail}>
+                  {hasTailFiles ? (
+                    <ChangedFilesCard
+                      files={turnFilesByTurn.get(group.turn) ?? []}
+                      turn={group.turn}
+                      {...(onOpenChanges === undefined ? {} : { onOpenChanges })}
+                    />
+                  ) : null}
+                  {/* The turn's submitted plans, next to its changed files — dsh's
+                      turn tail holds both, and both belong to the turn that caused
+                      them rather than to the tool row that mentioned it. */}
+                  {hasTailPlans ? (
+                    <PlanCard plans={plansByTurn.get(group.turn) ?? []} onOpenPlan={onOpenPlan} />
+                  ) : null}
+                  {hasAnswer ? (
+                    <MessageActions
+                      text={assistantTextOf(group.messages)}
+                      usage={turnMeta.get(group.turn)?.usage ?? null}
+                      model={turnMeta.get(group.turn)?.model ?? null}
+                      durationMs={turnMeta.get(group.turn)?.durationMs ?? null}
+                      timestamp={turnMeta.get(group.turn)?.endedAt ?? null}
+                      forkEntryId={turnMeta.get(group.turn)?.forkEntryId ?? null}
+                      {...(onFork === undefined ? {} : { onFork })}
+                    />
+                  ) : null}
+                </div>
               ) : null}
             </div>
           );

@@ -1,4 +1,4 @@
-import type { Translate, UiLanguage } from "./i18n/index.ts";
+import type { Translate } from "./i18n/index.ts";
 
 /**
  * `{minutes}分{seconds}秒` / `{seconds}秒` — the `duration.*` templates, with
@@ -66,31 +66,27 @@ export function formatTokens(count: number): string {
 }
 
 /**
- * Month names for the English rendering. Written out rather than delegated to
- * `Intl.DateTimeFormat` so the label is the same in every browser and in the
- * node test run — the format is fixed, only the language varies.
+ * A message timestamp as dsh renders it: `21:00` for something sent today,
+ * `9月17日 21:00` for another day this year, and `2025年9月17日 21:00` across a
+ * year boundary (`9/17 21:00` / `2025-9-17 21:00` in English).
+ *
+ * The date is dropped exactly while it would be noise and spelled out as soon as
+ * it is not: a transcript is mostly read on the day it was written, and a bare
+ * `21:00` is the least the row has to say. `now` is a parameter, not a call to
+ * `Date.now()`, because the caller passes a day that ticks over at midnight
+ * (`useCalendarDay`) and because the tests pin both sides of the comparison.
  */
-const EN_MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-];
-
-/** A message timestamp as dsh shows it: `9月17日 21:00`, or `Sep 17, 21:00`. */
-export function formatMessageTime(timestamp: number, language: UiLanguage): string {
-  const d = new Date(timestamp);
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  return language === "zh-CN"
-    ? `${d.getMonth() + 1}月${d.getDate()}日 ${hh}:${mm}`
-    : `${EN_MONTHS[d.getMonth()]} ${d.getDate()}, ${hh}:${mm}`;
+export function formatMessageClock(timestamp: number, t: Translate, now: number = Date.now()): string {
+  const at = new Date(timestamp);
+  const today = new Date(now);
+  const hh = String(at.getHours()).padStart(2, "0");
+  const mm = String(at.getMinutes()).padStart(2, "0");
+  const sameDay =
+    at.getFullYear() === today.getFullYear() &&
+    at.getMonth() === today.getMonth() &&
+    at.getDate() === today.getDate();
+  if (sameDay) return `${hh}:${mm}`;
+  const params = { y: at.getFullYear(), m: at.getMonth() + 1, d: at.getDate() };
+  const date = t(at.getFullYear() === today.getFullYear() ? "clock.md" : "clock.ymd", params);
+  return `${date} ${hh}:${mm}`;
 }

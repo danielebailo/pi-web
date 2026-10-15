@@ -1,43 +1,101 @@
 /*
- * The action row sits under the message it belongs to and stays out of the way:
- * secondary label colour, no background until hovered. dsh's own row is the
- * same shape, which is what keeps a long transcript from looking striped.
+ * The action row under a message, in dsh's own measurements: 28px square
+ * targets on the `sm` radius, an 8px gap, the glyphs a step below the label
+ * colour, and the usage figure wearing the same 28px band as the buttons beside
+ * it. The row belongs to the message it sits under, so it stays the quietest
+ * thing in the transcript until it is touched — which is what keeps a long
+ * session from looking striped.
  */
-.row {
+.actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  height: calc(28px + var(--dsh-content-font-delta, 0px));
   margin-top: 6px;
-  min-height: 24px;
-  font-size: 13px;
-  line-height: 20px;
+  /* The one colour the row states; every figure and glyph inside inherits it. */
   color: var(--dsw-alias-label-tertiary);
 }
 
+/*
+ * An answer's row hangs under the answer's own text, so the 6px of padding its
+ * icons need for a full-size hit area is pulled back out again: without this the
+ * first glyph sits 6px right of the text it belongs to (dsh's turn-tail
+ * `margin-left: -6px`). A prompt's row is right-aligned against its bubble and
+ * needs no such correction — dsh leaves those at the bubble's edge.
+ */
+.actionsTail {
+  margin-left: -6px;
+}
+
 /* User messages are right-aligned, so their actions are too. */
-.rowEnd {
+.actionsEnd {
   justify-content: flex-end;
 }
 
 .action {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
+  width: calc(28px + var(--dsh-content-font-delta, 0px));
+  height: calc(28px + var(--dsh-content-font-delta, 0px));
+  padding: 6px;
   border: none;
-  border-radius: 6px;
-  color: var(--dsw-alias-label-tertiary);
+  border-radius: var(--dsw-radius-sm);
   background: none;
+  color: var(--dsw-alias-label-tertiary);
   cursor: pointer;
 }
 
+/*
+ * The row's glyphs are sized here rather than passed to `Glyph`: CSS beats the
+ * `width`/`height` attributes an `<svg>` carries, so one rule covers every icon
+ * in the row and they all follow the font-size preference together.
+ */
+.action svg,
+.stat svg,
+.pill svg {
+  width: calc(15px + var(--dsh-content-font-delta, 0px));
+  height: calc(15px + var(--dsh-content-font-delta, 0px));
+}
+
+/*
+ * dsh sizes the two rows differently: an answer's tail draws its glyphs at 17px,
+ * a prompt's bubble at 15px (the default above). The attribute carries dsh's
+ * `clock` — `end` for the tail, `start` for a prompt — not this file's `align`.
+ */
+.actions[data-clock="end"] .action svg {
+  width: calc(17px + var(--dsh-content-font-delta, 0px));
+  height: calc(17px + var(--dsh-content-font-delta, 0px));
+}
+
 .action:hover {
-  color: var(--dsw-alias-label-primary);
+  color: var(--dsw-alias-label-secondary);
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
+/*
+ * A prompt's clock reads at the row's own size (dsh's `timeStart`); the answer's
+ * clock and the figures beside it are one size smaller (dsh's `timeEnd`), which
+ * is why a turn tail reads as a margin note rather than as a label.
+ */
+.timeStart {
+  padding-right: 12px;
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: calc(24px + var(--dsh-content-font-delta, 0px));
+  white-space: nowrap;
+}
+
+.timeEnd,
+.stat {
+  font-size: calc(var(--dsh-content-font-size-secondary, 13px) - 1px);
+  line-height: calc(24px + var(--dsh-content-font-delta, 0px));
+}
+
+.timeEnd {
+  white-space: nowrap;
+}
+
+/* The duration figure is a reading, not a control: same band, no hit area. */
 .stat {
   display: inline-flex;
   align-items: center;
@@ -45,15 +103,97 @@
   white-space: nowrap;
 }
 
-.statIcon {
+.stat svg {
   flex: none;
 }
 
-/* The timestamp is the quietest thing in the row. */
-.time {
-  color: var(--dsw-alias-label-caption);
+/*
+ * The turn-usage pill: dsh's `TurnUsagePanel` trigger. The figure alone raises
+ * the question the panel answers, so it is a button — the same 28px band with
+ * the database glyph and the total, opening the turn's bill on click.
+ */
+.pillAnchor {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
 }
 
-.copied {
-  color: var(--dsw-alias-state-success-primary);
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: calc(28px + var(--dsh-content-font-delta, 0px));
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: none;
+  color: var(--dsw-alias-label-tertiary);
+  /* `font` first: a button does not inherit the page's font on its own, and the
+     two lines below then set the half of it this row actually wants. */
+  font: inherit;
+  font-size: calc(var(--dsh-content-font-size-secondary, 13px) - 1px);
+  font-variant-numeric: tabular-nums;
+  line-height: calc(24px + var(--dsh-content-font-delta, 0px));
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pill svg {
+  flex: none;
+}
+
+.pill:hover,
+.pill[aria-expanded="true"] {
+  color: var(--dsw-alias-label-tertiary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.pillLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/*
+ * On a phone the pill keeps its glyph and drops the number: the full label
+ * pushes the row's other figures out of the bubble it sits in, and the panel
+ * behind the click still has every one of them (dsh's own 480px rule).
+ */
+@media (max-width: 480px) {
+  .pill {
+    justify-content: center;
+    width: calc(28px + var(--dsh-content-font-delta, 0px));
+    padding: 6px;
+  }
+
+  .pillLabel {
+    display: none;
+  }
+}
+
+/*
+ * Which action rows are visible without being touched: the newest prompt's, and
+ * the newest answer's when the turn ends in one (`endsWithResponse` — see
+ * `MessageList.tsx`). Every earlier row reveals on hover —
+ * or on focus-within, so it is still reachable by keyboard. The transcript says
+ * which is which on each message's container (see `MessageList.tsx`); dsh keys
+ * the same rule on the same attribute, and nothing here may take a row away from
+ * an `always` one — the rule below matches `hover` and only `hover`.
+ *
+ * `opacity` rather than `display`/`visibility`: the row keeps its height, so
+ * revealing one never moves the transcript under the reader. The transition
+ * lives on the hidden state so it plays in both directions. Devices with no
+ * hover pointer keep every row visible — this media query is the whole fix.
+ */
+@media (hover: hover) {
+  [data-actions-reveal="hover"] .actions {
+    opacity: 0;
+    transition: opacity 80ms ease;
+  }
+
+  [data-actions-reveal="hover"]:hover .actions,
+  [data-actions-reveal="hover"]:focus-within .actions {
+    opacity: 1;
+  }
 }

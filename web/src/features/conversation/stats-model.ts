@@ -17,7 +17,7 @@
  * Kept free of React so the arithmetic — which is the part that silently rots —
  * can be tested directly.
  */
-import type { AgentMessage, AssistantMessage } from "../../lib/types.ts";
+import type { AgentMessage, AssistantMessage, MessageUsage } from "../../lib/types.ts";
 import type { Translate } from "../../lib/i18n/index.ts";
 
 /** The three disjoint prompt-side buckets plus the completion. */
@@ -126,6 +126,44 @@ function usageOf(message: AgentMessage): UsageTotals | null {
     cacheRead: bucket(usage.cacheRead),
     cacheWrite: bucket(usage.cacheWrite),
   };
+}
+
+/**
+ * One turn's token accounting: the sum of its model calls, bucket by bucket.
+ *
+ * `sessionStats` does the same arithmetic across a whole session; this is the
+ * one-turn slice of it, for the panel behind a turn's usage pill. The buckets
+ * are summed rather than read off the newest message because the panel shows all
+ * four beside the total, and a total that is the sum of parts nobody added up is
+ * a panel claiming the turn was never billed.
+ *
+ * `totalTokens` is the sum of what pi recorded per message, so a turn's headline
+ * figure is the same one this transcript has always shown: pi's own total is its
+ * sum of the same four buckets.
+ */
+export function turnUsage(messages: AgentMessage[]): MessageUsage | null {
+  let totalTokens = 0;
+  let input = 0;
+  let output = 0;
+  let cacheRead = 0;
+  let cacheWrite = 0;
+  let sawUsage = false;
+
+  for (const message of messages) {
+    if (message.role !== "assistant") continue;
+    const total = (message as { usage?: { totalTokens?: unknown } }).usage?.totalTokens;
+    if (typeof total !== "number" || !Number.isFinite(total)) continue;
+    const usage = usageOf(message);
+    if (usage === null) continue;
+    sawUsage = true;
+    totalTokens += total;
+    input += usage.input;
+    output += usage.output;
+    cacheRead += usage.cacheRead;
+    cacheWrite += usage.cacheWrite;
+  }
+
+  return sawUsage ? { input, output, cacheRead, cacheWrite, totalTokens } : null;
 }
 
 /**

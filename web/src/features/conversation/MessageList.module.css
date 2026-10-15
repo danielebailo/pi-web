@@ -99,6 +99,20 @@
   min-width: 0;
 }
 
+/*
+ * A turn's tail: its changed files, its plans, and its action row. The same gap
+ * the turn uses between its rows, so the three read as one block the way dsh's
+ * turn tail does — which is also the unit the transcript reveals the action row
+ * from, since hovering any of them counts as hovering the message they belong
+ * to. See `data-actions-reveal` in `MessageActions.module.css`.
+ */
+.turnTail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
 .hint {
   color: var(--dsw-alias-label-tertiary);
   font-size: 13px;
