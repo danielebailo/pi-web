@@ -9,6 +9,7 @@ import type { MessageKey } from "../../lib/i18n/index.ts";
 import { formatRelativeTime } from "../../lib/format.ts";
 import type { ProjectNode } from "../../lib/project-tree.ts";
 import { useStore } from "../../lib/store.ts";
+import { useDelayedFlag } from "../../lib/use-delayed-flag.ts";
 import styles from "../../layout/Sidebar.module.css";
 import { sessionRowsOf } from "./session-rows.ts";
 import { NO_DRAG, type RowDragHandlers, type SidebarDrag } from "./use-sidebar-drag.ts";
@@ -260,6 +261,12 @@ export function ProjectTreeItem({
   const shown = rows.sessions;
   const unsaved = rows.drafts;
   const remaining = rows.remaining;
+  // A first read is a disk walk on the server, so this is the one wait worth
+  // naming — but not for the first few frames: a warm workspace answers in
+  // milliseconds, and a hint that appears and vanishes just flickers. The
+  // delay is the same one the transcript uses (see `useDelayedFlag`), and it
+  // has to be called here, above the early return below, to keep hook order.
+  const loading = useDelayedFlag(rows.loading);
 
   const selected = state.selectedSessionPath;
   /** What an extension is blocked on in this row's session, or null. */
@@ -450,7 +457,9 @@ export function ProjectTreeItem({
           ) : null}
 
           {unsaved.length === 0 && shown.length === 0 && !searching ? (
-            <p className={styles.emptyList} style={{ marginLeft: indent }}>{t("session.empty")}</p>
+            <p className={styles.emptyList} style={{ marginLeft: indent }}>
+              {loading ? t("session.loading") : t("session.empty")}
+            </p>
           ) : null}
         </>
       ) : null}

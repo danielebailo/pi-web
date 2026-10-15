@@ -131,6 +131,20 @@ export interface AppState {
    * what labels "show more" with the number of rows still folded away.
    */
   sessionTotals: Record<string, number>;
+  /**
+   * Projects whose first page of sessions is being fetched right now.
+   *
+   * A workspace that has never been listed and one that really holds nothing
+   * look the same to the sidebar — `sessions` has no entry for either — so this
+   * is what tells the wait apart from the empty state. Without it, expanding a
+   * workspace read as "还没有会话。" for as long as the server took to walk its
+   * files, which on a workspace with a hundred sessions is most of a second.
+   *
+   * Only a *first* read sets it (see `refreshSessions`), because that is the
+   * only read that leaves the sidebar with nothing to draw: a reload behind
+   * rows already on screen keeps those rows rather than a hint.
+   */
+  sessionsLoading: Record<string, true>;
   selectedSessionPath: string | null;
   /**
    * Session paths this browser created that pi has not written to disk yet,
@@ -274,6 +288,7 @@ const initialState: AppState = {
   selectedProjectId: null,
   sessions: {},
   sessionTotals: {},
+  sessionsLoading: {},
   selectedSessionPath: null,
   unsavedSessions: {},
   activeSessions: [],
@@ -358,6 +373,25 @@ function scheduleCommandsRetry(projectId: string, presetId: string): void {
 const sessionRequests = new Map<string, number>();
 
 export const appStore: Store<AppState> = createStore(initialState);
+
+/**
+ * Mark (or unmark) one project's session list as being fetched.
+ *
+ * Written straight to the store because `refreshSessions` has no state to hand
+ * back — but only when the mark really changes: the store skips the notify for
+ * an identical object, and every reload of a workspace whose rows are already
+ * on screen would otherwise re-render the sidebar twice for a flag nobody
+ * draws. `sessionRowsOf` is the only reader.
+ */
+function markSessionsLoading(projectId: string, loading: boolean): void {
+  appStore.update((state) => {
+    if ((state.sessionsLoading[projectId] === true) === loading) return state;
+    const sessionsLoading = { ...state.sessionsLoading };
+    if (loading) sessionsLoading[projectId] = true;
+    else delete sessionsLoading[projectId];
+    return { ...state, sessionsLoading };
+  });
+}
 
 /**
  * The `t()` for whichever language the current settings resolve to.
@@ -941,6 +975,11 @@ export const actions = {
 
     const sequence = (sessionRequests.get(projectId) ?? 0) + 1;
     sessionRequests.set(projectId, sequence);
+    // A workspace already holding a page has rows to draw, so its reload stays
+    // invisible; only the first read has to explain itself. The mark is cleared
+    // in the `finally` below — on the answer, on a dropped answer, and on a
+    // failure alike.
+    if (before.sessions[projectId] === undefined) markSessionsLoading(projectId, true);
 
     try {
       const page = await api.listSessions(projectId, {
@@ -968,6 +1007,10 @@ export const actions = {
       });
     } catch (err) {
       actions.setNotice((err as Error).message);
+    } finally {
+      // Only the newest request may clear the mark: an answer superseded in
+      // flight must not take down the hint its successor is still showing.
+      if (sessionRequests.get(projectId) === sequence) markSessionsLoading(projectId, false);
     }
   },
 

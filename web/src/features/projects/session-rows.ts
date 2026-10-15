@@ -24,6 +24,27 @@ export interface SessionRows {
   limit: number;
   /** How many rows the workspace still holds beyond `sessions`. */
   remaining: number;
+  /**
+   * True while this workspace's first page is still on its way.
+   *
+   * The sidebar draws a workspace's rows from `state.sessions[projectId]`
+   * alone, so a list that has not arrived yet and one that is genuinely empty
+   * have the same shape. This is the difference between "还没有会话。" and a
+   * hint that the wait is a wait — see `sessionsLoading` in the app state.
+   */
+  loading: boolean;
+}
+
+/**
+ * Whether one workspace's *first* page of sessions is still being fetched.
+ *
+ * A page that came back empty is a settled answer, not a pending one: the
+ * project has an entry in `sessions` either way, and only a project with no
+ * entry at all is still waiting. That is also why a reload behind rows already
+ * on screen never reaches this: the entry is there, so nothing is "awaiting".
+ */
+function awaitingFirstPage(state: AppState, projectId: string): boolean {
+  return state.sessionsLoading[projectId] === true && state.sessions[projectId] === undefined;
 }
 
 /**
@@ -33,7 +54,8 @@ export interface SessionRows {
  * it answers with, so this is the client-side half of the same rule.
  */
 export function sessionRowsOf(state: AppState, projectId: string): SessionRows {
-  const all = state.sessions[projectId] ?? [];
+  const listed = state.sessions[projectId];
+  const all = listed ?? [];
   const visible = all.filter((session) => !session.hidden);
   const query = state.sessionQuery.trim().toLowerCase();
   const searching = query.length > 0;
@@ -56,7 +78,7 @@ export function sessionRowsOf(state: AppState, projectId: string): SessionRows {
   const drafts = (state.unsavedSessions[projectId] ?? []).filter(
     (path) => !all.some((session) => session.path === path),
   );
-  return { drafts, sessions, limit, remaining };
+  return { drafts, sessions, limit, remaining, loading: awaitingFirstPage(state, projectId) };
 }
 
 /** One flat list's rows: every workspace's drafts, then every session. */
@@ -65,6 +87,9 @@ export interface FlatRows {
   drafts: string[];
   /** Every loaded session, in the current order. */
   sessions: SessionView[];
+  /** True while any workspace's first page is still on its way; this list asks
+   * every one of them, so its empty state waits on the first to answer. */
+  loading: boolean;
 }
 
 /**
@@ -100,5 +125,9 @@ export function flatSessionRowsOf(state: AppState): FlatRows {
       if (!all.some((session) => session.path === path)) drafts.push(path);
     }
   }
-  return { drafts, sessions };
+  return {
+    drafts,
+    sessions,
+    loading: state.projects.some((project) => awaitingFirstPage(state, project.id)),
+  };
 }

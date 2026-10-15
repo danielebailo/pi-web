@@ -1,4 +1,4 @@
-import { mkdtemp, realpath, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, realpath, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SessionManager, type SessionInfo } from "@earendil-works/pi-coding-agent";
@@ -346,6 +346,152 @@ describe("listSessions", () => {
       const third = await sessions.listSessions(projectCwd, { sessionDir });
       expect(parsed).toHaveBeenCalledTimes(2);
       expect(third.sessions.map((s) => s.title)).toEqual(["fresh", "cached"]);
+    } finally {
+      parsed.mockRestore();
+    }
+  });
+
+  /**
+   * The cache is only worth having if it says what pi says. A file that moved is
+   * the interesting case: every field of that one has to come from its new
+   * content, and the rows around it from what was read before.
+   */
+  it("agrees with pi's own listing when a single file moves", async () => {
+    await writeSession("step-a.jsonl", {
+      id: "aaaa1111-1111-1111-1111-111111111111",
+      cwd: projectCwd,
+      message: "first a",
+      timestamp: "2026-01-01T00:00:00.000Z",
+    });
+    await writeSession("step-b.jsonl", {
+      id: "bbbb2222-2222-2222-2222-222222222222",
+      cwd: projectCwd,
+      message: "first b",
+      timestamp: "2026-02-01T00:00:00.000Z",
+    });
+    await sessions.listSessions(projectCwd, { sessionDir });
+
+    await writeSession("step-b.jsonl", {
+      id: "bbbb2222-2222-2222-2222-222222222222",
+      cwd: projectCwd,
+      message: "rewritten b",
+      name: "renamed b",
+      timestamp: "2026-03-01T00:00:00.000Z",
+    });
+
+    const { sessions: list } = await sessions.listSessions(projectCwd, { sessionDir });
+    const truth = (await SessionManager.list(projectCwd, sessionDir)).map((info) =>
+      sessions.toSessionView(info, undefined),
+    );
+    expect(list).toEqual(truth);
+    expect(list.map((s) => s.title)).toEqual(["renamed b", "first a"]);
+  });
+
+  /**
+   * The point of the exercise: a file that did not move is never streamed again.
+   * Asserted on what pi was handed, not only on how often it was called.
+   */
+  it("hands pi only the file that moved", async () => {
+    await writeSession("only-a.jsonl", {
+      id: "cccc3333-3333-3333-3333-333333333333",
+      cwd: projectCwd,
+      message: "a",
+      timestamp: "2026-01-01T00:00:00.000Z",
+    });
+    await writeSession("only-b.jsonl", {
+      id: "dddd4444-4444-4444-4444-444444444444",
+      cwd: projectCwd,
+      message: "b",
+      timestamp: "2026-02-01T00:00:00.000Z",
+    });
+    await sessions.listSessions(projectCwd, { sessionDir });
+
+    const staged: string[][] = [];
+    const original = SessionManager.list.bind(SessionManager);
+    const parsed = vi
+      .spyOn(SessionManager, "list")
+      .mockImplementation(async (...args: Parameters<typeof SessionManager.list>) => {
+        const dir = args[1];
+        if (typeof dir === "string" && dir !== sessionDir) staged.push((await readdir(dir)).sort());
+        return original(...args);
+      });
+    try {
+      await writeSession("only-b.jsonl", {
+        id: "dddd4444-4444-4444-4444-444444444444",
+        cwd: projectCwd,
+        message: "rewritten b",
+        timestamp: "2026-03-01T00:00:00.000Z",
+      });
+      const { sessions: list } = await sessions.listSessions(projectCwd, { sessionDir });
+      expect(list.map((s) => s.title)).toEqual(["rewritten b", "a"]);
+      expect(parsed).toHaveBeenCalledTimes(1);
+    } finally {
+      parsed.mockRestore();
+    }
+
+    expect(staged).toEqual([["only-b.jsonl"]]);
+  });
+
+  /**
+   * Left to the cache alone, a deleted session would keep its row for the life
+   * of the process. Reconciling has to cost nothing when nothing else moved.
+   */
+  it("drops a deleted session without reading the directory again", async () => {
+    await writeSession("kept.jsonl", {
+      id: "eeee5555-5555-5555-5555-555555555555",
+      cwd: projectCwd,
+      message: "kept",
+      timestamp: "2026-01-01T00:00:00.000Z",
+    });
+    const doomed = await writeSession("deleted.jsonl", {
+      id: "ffff6666-6666-6666-6666-666666666666",
+      cwd: projectCwd,
+      message: "deleted",
+      timestamp: "2026-02-01T00:00:00.000Z",
+    });
+    await sessions.listSessions(projectCwd, { sessionDir });
+
+    const parsed = vi.spyOn(SessionManager, "list");
+    try {
+      await rm(doomed, { force: true });
+      const { sessions: list, total } = await sessions.listSessions(projectCwd, { sessionDir });
+      expect(list.map((s) => s.title)).toEqual(["kept"]);
+      expect(total).toBe(1);
+      expect(parsed).not.toHaveBeenCalled();
+    } finally {
+      parsed.mockRestore();
+    }
+  });
+
+  /**
+   * pi skips a file it cannot read as a session (here: no session banner at
+   * all). That answer has to be kept as well, or every later request would stage
+   * the file, come up short, and go read the whole directory again.
+   */
+  it("remembers a skipped file instead of reading the directory again", async () => {
+    await writeSession("readable.jsonl", {
+      id: "9999aaaa-7777-7777-7777-777777777777",
+      cwd: projectCwd,
+      message: "readable",
+      timestamp: "2026-01-01T00:00:00.000Z",
+    });
+    await sessions.listSessions(projectCwd, { sessionDir });
+    await writeFile(
+      join(sessionDir, "not-a-session.jsonl"),
+      `${JSON.stringify({ hello: "world" })}\n`,
+      "utf8",
+    );
+
+    const parsed = vi.spyOn(SessionManager, "list");
+    try {
+      const first = await sessions.listSessions(projectCwd, { sessionDir });
+      expect(first.sessions.map((s) => s.title)).toEqual(["readable"]);
+      // The staged directory first, then the real one to settle the file it
+      // could not answer for.
+      expect(parsed).toHaveBeenCalledTimes(2);
+
+      await sessions.listSessions(projectCwd, { sessionDir });
+      expect(parsed).toHaveBeenCalledTimes(2);
     } finally {
       parsed.mockRestore();
     }

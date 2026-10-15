@@ -712,6 +712,112 @@ describe("session selection follows its workspace", () => {
 });
 
 /**
+ * A workspace's first page is marked in flight while it is being read.
+ *
+ * The sidebar draws a workspace from `sessions[projectId]` alone, so a read in
+ * progress and a workspace that is genuinely empty have the same shape. This is
+ * the flag that tells them apart — the workspace row's hint is drawn from it
+ * (see `session-rows.ts`), and it has to survive both a failure and a reload
+ * that was superseded while it ran.
+ */
+describe("a workspace's first page is marked in flight", () => {
+  const project = (id: string): ProjectView => ({
+    id,
+    path: `/home/me/${id}`,
+    title: id,
+    order: 0,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    exists: true,
+  });
+
+  const seed = (): void => {
+    appStore.update((state) => ({
+      ...state,
+      projects: [project("p1")],
+      selectedProjectId: "p1",
+    }));
+  };
+
+  /** A page we answer by hand, so the mark can be read while it is in flight. */
+  const deferredPage = () => {
+    let resolve!: (value: Awaited<ReturnType<typeof api.listSessions>>) => void;
+    const promise = new Promise<Awaited<ReturnType<typeof api.listSessions>>>((res) => {
+      resolve = res;
+    });
+    return { promise, resolve };
+  };
+
+  it("marks the workspace until the page lands", async () => {
+    seed();
+    const page = deferredPage();
+    mocked.listSessions.mockReturnValue(page.promise);
+
+    const reading = actions.refreshSessions("p1");
+    expect(appStore.get().sessionsLoading.p1).toBe(true);
+
+    page.resolve({ sessions: [diskSession(REAL_PATH)], total: 1 });
+    await reading;
+
+    expect(appStore.get().sessionsLoading.p1).toBeUndefined();
+    expect(appStore.get().sessions.p1).toHaveLength(1);
+  });
+
+  it("clears the mark when the read fails", async () => {
+    seed();
+    mocked.listSessions.mockRejectedValueOnce(new Error("offline"));
+
+    await actions.refreshSessions("p1");
+
+    // A failed read says nothing about the workspace, so it must not leave a
+    // hint running with no answer coming.
+    expect(appStore.get().sessionsLoading.p1).toBeUndefined();
+    expect(appStore.get().sessions.p1).toBeUndefined();
+  });
+
+  it("leaves a workspace that already holds rows unmarked", async () => {
+    seed();
+    appStore.update((state) => ({
+      ...state,
+      sessions: { p1: [diskSession(REAL_PATH)] },
+      sessionTotals: { p1: 1 },
+    }));
+    const page = deferredPage();
+    mocked.listSessions.mockReturnValue(page.promise);
+
+    const reading = actions.refreshSessions("p1", { force: true });
+    expect(appStore.get().sessionsLoading.p1).toBeUndefined();
+
+    page.resolve({ sessions: [diskSession(REAL_PATH)], total: 1 });
+    await reading;
+    expect(appStore.get().sessionsLoading.p1).toBeUndefined();
+  });
+
+  it("does not clear a newer read's mark", async () => {
+    seed();
+    const first = deferredPage();
+    mocked.listSessions.mockReturnValueOnce(first.promise);
+    const reading = actions.refreshSessions("p1");
+    expect(appStore.get().sessionsLoading.p1).toBe(true);
+
+    // "Show more" is clicked before the first answer lands.
+    const second = deferredPage();
+    mocked.listSessions.mockReturnValueOnce(second.promise);
+    const rereading = actions.refreshSessions("p1", { force: true });
+    expect(appStore.get().sessionsLoading.p1).toBe(true);
+
+    first.resolve({ sessions: [diskSession(REAL_PATH)], total: 1 });
+    await reading;
+    // The dropped answer must not take down the hint its successor is showing.
+    expect(appStore.get().sessionsLoading.p1).toBe(true);
+
+    second.resolve({ sessions: [diskSession(REAL_PATH)], total: 1 });
+    await rereading;
+    expect(appStore.get().sessionsLoading.p1).toBeUndefined();
+  });
+});
+
+/**
  * The sidebar's viewing preferences: how it groups what it draws, how it orders
  * the rows, and the manual arrangement a drag leaves behind. All three are
  * cached in `localStorage`, so these stand one up and read it back.

@@ -16,6 +16,7 @@ import { appStore, isDraftSession, useT } from "../../lib/app-state.ts";
 import { formatRelativeTime } from "../../lib/format.ts";
 import { FLAT_ORDER_KEY } from "../../lib/sidebar-view.ts";
 import { useStore } from "../../lib/store.ts";
+import { useDelayedFlag } from "../../lib/use-delayed-flag.ts";
 import styles from "../../layout/Sidebar.module.css";
 import { SessionRow, sessionStatus } from "./ProjectTree.tsx";
 import { pendingAskOf, type PendingAsk } from "../conversation/question-model.ts";
@@ -26,6 +27,10 @@ export function FlatSessionList({ drag }: { drag: SidebarDrag }) {
   const t = useT();
   const state = useStore(appStore);
   const rows = flatSessionRowsOf(state);
+  // Delayed for the same reason the workspace's own hint is: this list arrives
+  // in milliseconds when every workspace is warm, and an immediate hint would
+  // flash and vanish. Called above the early return below, to keep hook order.
+  const loading = useDelayedFlag(rows.loading);
   const selected = state.selectedSessionPath;
   /**
    * Which workspace each row belongs to.
@@ -48,7 +53,11 @@ export function FlatSessionList({ drag }: { drag: SidebarDrag }) {
     pendingAskOf(state.pendingUiRequests, path);
 
   if (rows.drafts.length === 0 && rows.sessions.length === 0) {
-    return <p className={styles.emptyList}>{t("session.empty")}</p>;
+    return (
+      <p className={styles.emptyList}>
+        {loading ? t("session.loading") : t("session.empty")}
+      </p>
+    );
   }
 
   return (

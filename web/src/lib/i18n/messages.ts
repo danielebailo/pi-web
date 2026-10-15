@@ -819,6 +819,7 @@ export const zhCN = {
   "session.unsaved": "未保存",
   "session.expandAll": "展开其余 {count} 个会话",
   "session.empty": "还没有会话。",
+  "session.loading": "正在载入会话列表…",
   "layout.disconnected": "无法连接服务端，请确认 API 已启动。",
   "layout.dismiss": "关闭提示",
 
@@ -1606,6 +1607,7 @@ export const en: Record<MessageKey, string> = {
   "session.unsaved": "Unsaved",
   "session.expandAll": "Show {count} more sessions",
   "session.empty": "No sessions yet.",
+  "session.loading": "Loading sessions…",
   "layout.disconnected": "Cannot reach the server. Is the API running?",
   "layout.dismiss": "Dismiss",
 
