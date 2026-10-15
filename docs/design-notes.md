@@ -604,13 +604,41 @@ pi 自己的 loader（`dist/extensions/mcp/config.js` 的 `loadMcpConfig` / `upd
 
 **参数是「表单里当前的值」，不是已保存的 provider。** 这个功能最有用的时刻就是**建一个 provider 的时候**——那时还没有 id、也没有文件可读。所以接口收的是未保存的 `baseUrl` / `api` / `apiKey`，密钥未填时服务端回退到 `auth.json` 里存的那个（**回传的只有模型列表，密钥永远不回前端**）。没有任何写入，所以不会清掉驻留进程。
 
-**已在目录中的模型会列出但不可选。** 列出是因为一个用户找得到的模型在列表里看不到，读起来像拉取失败；不可选是因为重加一个会重写它的条目，把手工改过的 `contextWindow` / `cost` 覆盖掉。
+**已在目录中的模型默认不勾选，重加也不会覆盖已有条目。** 列出是因为一个用户找得到的模型在列表里看不到，读起来像拉取失败；默认不勾是因为这个对话框最常被打开的理由是「看看我漏了什么」，而已经在文件里的那些恰好是重加一次就会出问题的那批。它们仍然可勾——但合入时**已有的条目赢**，所以手工改过的 `contextWindow` / `cost` 不会被端点报回来的值替换掉。
 
 **「全选」作用于筛选后的行，不是全部。** 搜索框里打着字的时候，「全选」如果连被你筛掉的也选上，这个意外会在保存之后才发现。
 
 **这个功能真的有价值，不只是对齐截图。** 实测：用户的 `cz` 提供 **11 个**模型，而 `models.json` 里只配了 **5 个**——发现这个差别正是这一节存在的理由。
 
 **删除的确认文案分两种，因为后果真的不同。** 凭据在 `auth.json` 里时，提示是「会移除其配置和存储的 API 密钥」；否则是「其使用的凭证（如有）由其他位置管理，将会保留」——环境变量给的 key 从来不是我们写的，删除 provider 也不该去碰它。两句都是 dsh 原文。
+
+**这一节的样式和逻辑照 dsh 重做了一遍。** 行不再是 44px 的扁条，而是 dsh 的卡片（`settings-card-fill` / `settings-card-stroke` 这两个 token 也是这次补进主题的）；编辑器不再是弹窗，而是就地展开在那一行下面——**同一时刻只有一张卡**，点第二行的「编辑」会先把上一张和「添加」卡收起来。添加入口从两个按钮变成一个：卡片顶上是一个分段控件，在**第三方模型提供商**（从内置目录里选一个 pi 已认识的 id）和**自定义模型 API**（手写 id、地址、协议）之间切换；两块面板一旦访问过就留在 DOM 里只做 `hidden`，所以来回切不会丢掉任何一边填了一半的内容，切换本身在有一边正在写入或正在问端点时禁用。
+
+**页面标题也改用了 dsh 的 `.title`（16/24）。** 最初这里写的是 20/28 的 `.heading`，理由是「dsh 的 `.title` 上面还有一层外壳的页面标题，这个应用的四节各自渲染 `<h1>`，字号该跟着角色走」——像素级对齐之后这个理由不再成立：同一个位置两边就该是同一个字号。连带的是标题行的高度：`.title` 的行盒是 24px，配置路径按钮也从 28px 收到 24px，否则它会把标题行撑高 4px，下面每一行都跟着往下挪。
+
+**dsh 有三处在这里没有对应物，所以没有照搬。** 一是分区内的「已保存」提示：这个应用已经有一条全局通知栏，同一个事实写两遍只会有一条先过期；二是只读提示：pi 的 models 视图里没有 `writable` 这个概念，能读到就一定能写；三是首次运行时的「整节 setup 卡」——dsh 会把一个还没配密钥的 provider 直接渲染成它的设置卡，而 pi 不会列出一个没在 `models.json` 里定义过的内置 provider，没有行也就没有那种卡。
+
+**模型目录那一块照 dsh 分了标题行和元信息行。** 标题行右边是「获取可用模型」（表单里的地址还没填时禁用，`title` 说明原因）和「恢复默认模型」；元信息行说这个 provider 的目录是**已自定义**还是**正在使用 pi 内置目录**。恢复默认只给 pi 认识的 id——自定义 id 在 pi 那里没有目录可回退，那个链接只会把用户自己写出来的列表删掉。
+
+**分段控件是本地实现的。** 这个仓库没有 primitive 组件库，所以 dsh 的 `SegmentedControl` 被搬成 `SegmentedControl.tsx`，连同它的键盘行为（方向键在可用的段之间绕行、Home/End 到首尾、指示条靠 `--dsh-segment-count` / `--dsh-segment-index` 做一次 `translateX`），而不是换成两个 radio 或一个 `<select>`——`role="tablist"` 加 `aria-controls` 正好把两块面板的 `id` 定下来。
+
+**样式表是整份抄过来的，不是照着重写的。** `ModelsSection.module.css` 就是 dsh 那一份（724 行），只在末尾追加了这个页面自己的外壳类（标题、说明、配置路径、加载态、对话框按钮），`ProviderEditor.module.css` 和 `FetchModelsDialog.module.css` 因此删掉了。这样两边的样式可以逐 token 对照；缺的三个 token（`--dsw-radius-xl`、`--dsw-alias-settings-card-fill`、`--dsw-alias-settings-card-stroke`）补进了 `design-platform.css`，后两个在 dsh 里本来就是 `bg-layer-2` 和 `border-l4` 的别名。
+
+**像素级对齐先要对的是主题，不是样式表。** 用脚本把两边的主题树解析成浅色/深色两张表，再把这一节样式表引用到的 33 个 token 逐条解析 `var()` 链比一遍，只有 3 处对不上：`--dsw-alias-state-business-primary`（深色，真差异）、`--dsw-elevation-soft`（深色，是解析器的假阳性——dsh 深色块里有一条 `[data-menu-material]` 覆盖改写了描边色，两边实际都是 `border-l3`）、`--dsw-focus-ring-color`（这个应用根本没有，见下）。样式表本身既然是整份抄的，对不齐就只可能出在 token 上，这也是先查 token 的原因。
+
+**深色下的 `--dsw-static-deepseek-400` 是唯一一处真正的颜色偏差。** 应用写的是 `rgb(103, 158, 254)`，dsh 是 `rgb(122, 170, 255)`；浅色走 `deepseek-500`，两边一致，所以只有深色偏。它经 `--dsw-alias-state-business-primary` 传到这一节的输入框聚焦边框和焦点环兜底色，也就是「深色下点进输入框，边框那一下蓝得不一样」。改成 dsh 的值即可，其他 token 不动。
+
+**焦点环缺的是整个 `focus.css`。** dsh 的键盘环不是某条 `:focus` 规则，而是一套三件：`:root` 上的 `--dsw-focus-ring-width: 2px`；`:focus-visible` 读 `--dsw-focus-ring-color`（没有就退到 `business-primary`）；以及 `html[data-input-modality='pointer'] body :focus-visible:not(:read-write)` 把指针交互下的环涂成透明——鼠标点按钮不出环，键盘 Tab 才出。这个应用原来一条都没有，只能靠组件自带的 `box-shadow` 兜底（这一节的按钮就是），而输入框、复选框这类没自带环的地方就完全没有反馈。`focus.css` 整份搬过来；`input-modality.ts` 也搬，但改成显式调用（`main.tsx` 里 `watchInputModality()`），因为「模块加载即挂监听」的写法在这个仓库里没有先例。
+
+**宽度对齐的是外壳的列，不是分区自己的 `max-width`。** dsh 的设置面板是 800px 浮层减 188px 导航栏 = 612px 内容列，里面再留 24px 内边距，所以那一节实际渲染 **564px**。这个应用原来是 748px——那是 dsh 的**对话正文**宽度，当初是类比来的，不是照抄；加上 24px 内边距后分区是 612px，比 dsh 宽 48px。改法有两条：把 `.inner` 收成 564px，或者给每个分区加 `max-width: 564px`。选前者：后者等于让抄过来的样式表多一条 dsh 没有的规则，而前者的 564 正是「列宽减内边距」，是 dsh 那两层的算术结果。
+
+**dsh 的 Modal 指标搬进了这个应用的 Dialog 壳。** 两边弹窗的来源不同（dsh 是 primitive 的 `Modal`，这里是 40 行的 `Dialog`），但外壳指标可以照搬：遮罩 `z-index: 1000`、`bg-mask-1` 填充、2px 背景模糊；面板 `radius-panel`(28) + `bg-layer-2` + `elevation-prominent`、头部内边距 22/14/12/24、关闭按钮 28×28、描述 14/22 且左右 24px、底部内边距 24px、内容间距 20px。删除确认因此是 480px、模型选择器是 380px——`.fetchDialog` 那条 `max-width: 520px` 在 dsh 里也不起作用（`width` 已经是 `min(380px, 100%)`），它只是不让更长的标题把面板撑开，所以照抄不动。
+
+**复选框和图标也回到 dsh 的 primitive 库。** 这个仓库没有 Checkbox 组件，所以原生 `<input type="checkbox">` 带上 `ui-primitives/Checkbox.module.css` 的指标：16px、`accent-color: brand-primary`、标签 14/20、禁用时整行 0.5 透明度。图标同理：dsh 的 `IconChevronDownOutline16` / `IconChevronRightOutline16` / `IconCloseOutline16` 是描边 1.5 的**方头**线段，而本仓库的 `Glyph` 默认 `stroke-linecap: round`，直接换成 outline 图标会圆头——所以 `Glyph` 加了按图标声明的 `strokeLinecap`，`trash` 也标成 `butt`（dsh 的垃圾桶同样是方头）。
+
+**对齐是在真浏览器里量出来的。** 用 CDP 驱动本机 Chrome（1440×900，DPR 2 以便看清 0.5px 描边），浅色与深色各读一遍几何，与 dsh 的声明值逐项对照：分区 564px、标题 16/24/500 落在 y=32、说明 14/22 落在 y=68（= 24 + 12，与 dsh 同）、行列表 `gap: 8` + `margin-top: 12`、卡片内边距 12/14、圆角 20、描边 0.5px(`border-l4`)、填充 `settings-card-fill`、行内间距 12、标签 11/16、圆点 8px、行内按钮 28px/左右 10/圆角 8、添加按钮 44px 虚线/圆角 16、编辑器内边距 14/16/圆角 16/间距 14、密钥输入 32px/圆角 12、目录标题 12/18、模型行网格 `1.4fr 1fr 28px 28px`/间距 6、模型条目内边距 6/圆角 16、展开区两列 236px/间距 8、复选框 16px、分段控件 `grid`/间距 2/内边距 4/圆角 12（指示条 136×28、圆角 8、深色下描边是白色 20%）、以及上面那组弹窗指标——全部命中。深色下另测了 `deepseek-400` 的传播链：输入框聚焦边框实测 `rgb(122, 170, 255)`，与 dsh 一致。
+
+**顺带看清了 dsh 的弹窗和选择器都来自 primitive 库。** `Modal`、`Checkbox`、`SegmentedControl`、`Button` 都在 `ui-primitives` 里，dsh 的 `ModelsSection.module.css` 只写布局不写控件——所以这份样式表能整份抄过来，前提是这些控件的**指标**也一起抄（上面三条），否则抄过来的只是骨架。这个仓库没有那一层，于是控件就落成原生元素加本地样式。
 
 **图标从 dsh 的产物里取出来，逐字节相同。** 这一次新增了四个 glyph：侧栏齿轮、外观三个方块（`IconLightOutline16` / `IconDarkOutline16` / `IconFollowsystemOutline16`）。字号 stepper 的上下箭头共用一套 chevron，向上的那个是 `rotate(180deg)`，而不是第二份 path。插件那枚拼图和 MCP 那枚两端连线，是**两枚不是 dsh 原件的 glyph**：dsh 的插件分区和它的 MCP 面板都不声明导航图标（它的轨道按分区注册的内容画，而这两节注册的都是空的），所以形状是按同一套规则补的——16px viewBox、单条描边路径、1.25 线宽（和 `database` / `clock` 同一基线）——`dsh-icons.tsx` 的注释里也这么写着。刷新按钮直接复用了 `icons.tsx` 里的 `RefreshIcon`，没有为这一节再造一个圆箭头。
 

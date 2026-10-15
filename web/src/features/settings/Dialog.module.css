@@ -1,12 +1,20 @@
+/*
+ * dsh's modal layer: a full-viewport overlay above everything (its mask sits at
+ * 1000), the brand's mask fill — which flips with the appearance, unlike the
+ * literal black this used to paint — and the 2px backdrop blur the reference
+ * mask carries. The colour lives here rather than on an animated `::after`
+ * because this shell has no enter animation.
+ */
 .mask {
   position: fixed;
   inset: 0;
-  z-index: 60;
+  z-index: 1000;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgb(0 0 0 / 0.32);
+  background: var(--dsw-alias-bg-mask-1);
+  backdrop-filter: var(--dsw-mask-blur);
 }
 
 /*

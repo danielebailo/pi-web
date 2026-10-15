@@ -104,10 +104,18 @@
   overflow-y: auto;
 }
 
+/*
+ * dsh's settings content column is 612px wide (its 800px panel minus the 188px
+ * nav rail) and its options area pads 24px, so a section renders 564px wide
+ * there. Matching the column — rather than capping each section — is what keeps
+ * the ported sheets byte-identical to the reference and still puts every
+ * section at the reference's width. This box is content-boxed, so the number
+ * that goes here is the column minus the padding.
+ */
 .inner {
-  max-width: 748px;
+  max-width: 564px;
   margin: 0 auto;
-  padding: 32px 32px 48px;
+  padding: 32px 24px 48px;
 }
 
 /*

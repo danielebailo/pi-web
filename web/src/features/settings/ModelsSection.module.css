@@ -1,244 +1,917 @@
-.header {
+/* Every color resolves through a `--dsw-alias-*` token. Bare `--border` /
+ * `--surface` / `--text-*` names, which nothing in this app defines, would
+ * render the light-mode literals written as their fallbacks and stay light
+ * under the dark theme. */
+
+.section {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 720px;
+  color: var(--dsw-alias-label-primary);
 }
 
-.heading {
+.title {
   margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-  line-height: 28px;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 500;
   color: var(--dsw-alias-label-primary);
 }
 
-/*
- * dsh's header action is 打开配置文件, because a desktop app can hand the path
- * to the OS. A browser cannot, so this button copies the path instead and says
- * so — a control that promises a reveal and does nothing would be worse than
- * one with a narrower label.
- */
-.configPath {
-  flex: none;
-  font: inherit;
-  font-size: 14px;
-  line-height: 22px;
-  color: var(--dsw-alias-label-secondary);
-  background: none;
-  border: none;
-  padding: 4px 0;
-  cursor: pointer;
-}
-
-.configPath:hover {
-  color: var(--dsw-alias-label-primary);
-}
-
-.lead {
-  margin: 8px 0 0;
-  font-size: 14px;
-  line-height: 22px;
-  color: var(--dsw-alias-label-secondary);
-}
-
-.loading {
-  margin-top: 24px;
+.intro {
+  margin: 0;
   font-size: 14px;
   line-height: 22px;
   color: var(--dsw-alias-label-tertiary);
 }
 
-.list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 20px;
+.notice {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-state-warn-label);
 }
 
-/* dsh metrics: 44px tall, 12px radius, content inset 16px. */
-.row {
-  box-sizing: border-box;
+.savedNotice {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.rows {
+  list-style: none;
+  /* Extra air between the title/intro block and the first provider card. */
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Provider cards share the settings material; editors use the inset module fill. */
+.rowCard {
+  border: 0.5px solid var(--dsw-alias-settings-card-stroke);
+  background: var(--dsw-alias-settings-card-fill);
+  border-radius: var(--dsw-radius-xl);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.rowHead {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-height: 44px;
-  padding: 0 16px;
-  border-radius: 12px;
-  background: var(--dsw-alias-bg-module-platform);
+  gap: 10px;
+}
+
+.rowIdentity {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
 .rowName {
   font-size: 14px;
   line-height: 22px;
+  font-weight: 500;
   color: var(--dsw-alias-label-primary);
 }
 
-.badge {
+/* Reads as an annotation on the name, not as a second name: caption size and
+   the secondary label tone, so it never competes with the row's own title. It
+   sits inside `rowIdentity` with the credential dot, which is what keeps it
+   beside the name rather than drifting toward the actions. */
+.rowTag {
   flex: none;
-  padding: 1px 8px;
-  border-radius: 6px;
-  font-size: 12px;
-  line-height: 18px;
+  padding: 1px 6px;
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  border-radius: var(--dsw-radius-xs);
+  font-size: 11px;
+  line-height: 16px;
   color: var(--dsw-alias-label-secondary);
-  background: var(--dsw-alias-bg-base);
 }
 
-.dot {
+.credentialDot {
+  box-sizing: border-box;
+  display: inline-block;
   flex: none;
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  margin-left: 2px;
+  corner-shape: round;
 }
 
-.dotOn {
+.credentialDotConfigured {
   background: var(--dsw-alias-state-success-primary);
 }
 
-.dotOff {
+.credentialDotMissing {
   background: var(--dsw-alias-state-error-primary);
 }
 
 .rowActions {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 4px;
   margin-left: auto;
 }
 
-.pillButton {
+/* `box-sizing` on every control here: the app has no global border-box reset,
+   so without it the outlined variants stand 2px taller than the filled ones
+   they sit beside (Cancel next to Apply, Edit next to Delete). */
+.primaryButton,
+.secondaryButton,
+.addButton {
   box-sizing: border-box;
-  height: 28px;
-  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 36px;
+  padding: 0 14px;
   border: none;
-  border-radius: 14px;
+  border-radius: var(--dsw-radius-md);
   font: inherit;
-  font-size: 13px;
-  line-height: 18px;
-  color: var(--dsw-alias-label-primary);
-  background: var(--dsw-alias-bg-base);
+  font-size: 14px;
+  line-height: 22px;
   cursor: pointer;
 }
 
-.pillButton:hover {
+.primaryButton {
+  background: var(--dsw-alias-button-primary-fill);
+  color: var(--dsw-alias-label-primary-foreground);
+}
+
+.primaryButton:hover:not(:disabled) {
+  background: var(--dsw-alias-button-primary-hover);
+}
+
+.secondaryButton,
+.addButton {
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+}
+
+.secondaryButton:hover:not(:disabled),
+.addButton:hover:not(:disabled) {
   background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.secondaryButton:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover-solid);
 }
 
 .dangerButton {
-  font: inherit;
-  font-size: 13px;
-  line-height: 18px;
-  color: var(--dsw-alias-state-error-primary);
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-}
-
-.dangerButton:hover {
-  opacity: 0.8;
-}
-
-.addRow {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin-top: 22px;
-}
-
-/*
- * Dashed outline: dsh draws the two add affordances as empty slots rather than
- * filled buttons, which keeps them from competing with the provider rows.
- */
-.addButton {
   box-sizing: border-box;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  height: 44px;
-  border: 1px dashed var(--dsw-alias-border-l2);
-  border-radius: 12px;
+  height: 36px;
+  padding: 0 14px;
+  border: none;
+  border-radius: var(--dsw-radius-md);
+  background: transparent;
+  color: var(--dsw-alias-state-error-primary);
   font: inherit;
   font-size: 14px;
   line-height: 22px;
-  color: var(--dsw-alias-label-primary);
-  background: none;
   cursor: pointer;
 }
 
-.addButton:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
+.dangerButton:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover-danger);
 }
 
-.dialogTitle {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  line-height: 24px;
+/* Provider-row controls use the compact Button size. */
+.rowActions .secondaryButton,
+.rowActions .dangerButton {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--dsw-radius-sm);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.primaryButton:disabled,
+.secondaryButton:disabled,
+.dangerButton:disabled,
+.addButton:disabled,
+.linkButton:disabled,
+.addModelButton:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.primaryButton:focus-visible,
+.secondaryButton:focus-visible,
+.dangerButton:focus-visible,
+.addButton:focus-visible,
+.linkButton:focus-visible,
+.addModelButton:focus-visible,
+.iconButton:focus-visible,
+.customizedSummary:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+}
+
+/* Editing surface: a filled module on the panel, matching the settings
+   selector fill rather than adding another outline inside the row. */
+.editor {
+  border-radius: var(--dsw-radius-lg);
+  background: var(--dsw-alias-bg-module-platform);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.editorHeader {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.editorTitle {
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 500;
   color: var(--dsw-alias-label-primary);
 }
 
-.dialogCopy {
-  margin: 12px 0 0;
-  font-size: 14px;
-  line-height: 22px;
+.editorRoute {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fieldLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
   color: var(--dsw-alias-label-secondary);
 }
 
-.dialogError {
-  margin: 12px 0 0;
-  font-size: 14px;
-  line-height: 22px;
-  color: var(--dsw-alias-state-error-primary);
+.linkButton {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
 }
 
-.dialogActions {
+.linkButton:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.advancedHint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.editorActions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 20px;
 }
 
-.ghostButton {
-  box-sizing: border-box;
-  height: 36px;
-  padding: 0 16px;
-  border: none;
-  border-radius: 18px;
-  font: inherit;
-  font-size: 14px;
-  line-height: 22px;
-  color: var(--dsw-alias-label-primary);
+.addBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* The one entry to the add card, spanning the same width as the rows above. */
+.addActions {
+  display: flex;
+}
+
+.addButton {
+  /* Overrides the shared button base above: this is not a pill sitting in a
+     footer but the last slot of the provider list, so it fills the row and
+     repeats the row cards' corner. Dashed, like every other "nothing here yet"
+     affordance on this page, to read as a place rather than a command. */
+  flex: 1 1 0;
+  min-width: 180px;
+  gap: 6px;
+  height: 44px;
+  border: 1px dashed var(--dsw-alias-border-l3);
+  border-radius: var(--dsw-radius-lg);
+}
+
+/* The add card's mode switch with the one-line purpose of the chosen mode
+   beneath it; the switch hugs its labels rather than spanning the card. */
+.addModes {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+/* One panel per mode. Both stay mounted while the card is open; the hidden
+   attribute must win over the panel's own display, or the inactive draft
+   would show beneath the active one. */
+.addPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.addPanel[hidden] {
+  display: none;
+}
+
+.addCard,
+.setupCard {
+  border-radius: var(--dsw-radius-lg);
   background: var(--dsw-alias-bg-module-platform);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  list-style: none;
+}
+
+/* Nested in a card that already carries the module chrome. */
+.addCard .editor,
+.setupCard .editor {
+  background: none;
+  padding: 0;
+}
+
+.customized {
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
+  padding-top: 10px;
+}
+
+/* Native disclosure marker replaced by a rotating chevron: the built-in
+   triangle differs per engine and cannot take the label color. */
+.customizedSummary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  padding: 2px 4px;
+  margin-left: -4px;
+  border-radius: var(--dsw-radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-secondary);
+  list-style: none;
+}
+
+.customizedSummary::-webkit-details-marker {
+  display: none;
+}
+
+.customizedSummary::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid currentcolor;
+  border-bottom: 1.5px solid currentcolor;
+  transform: rotate(-45deg) translate(-1px, -1px);
+  transition: transform 120ms ease;
+}
+
+.customized[open] > .customizedSummary::before {
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+
+.customizedSummary:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
+.customizedBody {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 12px;
+}
+
+.modelCatalog {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
+}
+
+.modelCatalogHeading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.modelCatalogTitle {
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.modelCatalogMeta,
+.modelEmpty {
+  margin: 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.modelList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modelListHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.modelEntry {
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-lg);
+  padding: 6px;
+}
+
+.modelRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Square, label-free affordances: the row's own inputs carry the meaning, so
+   the actions stay glyphs and announce themselves through aria-label. */
+.iconButton {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
   cursor: pointer;
 }
 
-.ghostButton:hover:not(:disabled) {
+.iconButton:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.iconButton:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+/* The delete glyph keeps the danger tint the rest of the section uses. */
+.iconButtonDanger:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover-danger);
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.modelAdvanced {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 8px 4px 2px;
+}
+
+.modelField {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 4px;
+}
+
+.modelInputTypes {
+  grid-column: 1 / -1;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.modelInputTypes legend {
+  padding: 0;
+  margin-bottom: 4px;
+}
+
+.modelInputChoices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  min-height: 32px;
+  align-items: center;
+}
+
+.modelFieldLabel {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.modelEmpty {
+  padding: 12px;
+  border: 1px dashed var(--dsw-alias-border-l3);
+  border-radius: var(--dsw-radius-lg);
+  text-align: center;
+}
+
+.addModelButton {
+  box-sizing: border-box;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.addModelButton:hover:not(:disabled) {
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
-.ghostButton:disabled {
-  color: var(--dsw-alias-label-caption);
-  cursor: default;
-}
-
-.dangerButtonSolid {
+.input {
   box-sizing: border-box;
-  height: 36px;
-  padding: 0 16px;
-  border: none;
-  border-radius: 18px;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-md);
   font: inherit;
   font-size: 14px;
   line-height: 22px;
-  color: var(--dsw-alias-label-primary-inverted);
-  background: var(--dsw-alias-state-error-primary);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+}
+
+/* Enum pickers hold a handful of short options; a field-width dropdown reads
+   as a text field the user is expected to fill. */
+select.input {
+  max-width: 240px;
   cursor: pointer;
 }
 
-.dangerButtonSolid:disabled {
+.input:focus {
+  outline: none;
+  border-color: var(--dsw-alias-state-business-primary);
+}
+
+.input::placeholder {
+  color: var(--dsw-alias-label-dimmed);
+}
+
+.input:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+/* Select variant of .input: replaces the OS arrow (which sits flush against
+   the right edge) with the shared 12px chevron inset like the composer's
+   .select chips; the right pad reserves its cell. */
+.selectInput {
+  appearance: none;
+  padding-right: 32px;
+  /* Data-URI SVGs cannot resolve CSS variables; #81858C is the caption gray
+     shared by both themes. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%2381858C' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px 12px;
+}
+
+.error {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.deleteDialog {
+  width: min(480px, 100%);
+}
+
+.deleteConfirm:not(:disabled) {
+  border-color: var(--dsw-alias-state-error-primary);
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.deleteConfirm:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover-danger);
+}
+
+/* Icon-button label seat: named for assistive tech and for the tests that
+   query these controls by their text. */
+.hiddenLabel {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .customizedSummary::before,
+  .switchThumb {
+    transition: none;
+  }
+}
+
+.fetchDialog {
+  max-width: 520px;
+
+  /* The candidate list scrolls inside this dialog, an elevated surface, so the
+     scrollbar indirection is rebound here rather than on the scrolling child:
+     the elevation choice belongs with the surface and inherits down (see
+     ui-theme styles/scrollbar.css for the contract). */
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+}
+
+.candidateToolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.candidateSearch {
+  min-width: 0;
+  flex: 1 1 240px;
+}
+
+.candidateList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  margin: 0;
+  overflow-y: auto;
+  padding: 0;
+  list-style: none;
+}
+
+.candidate {
+  border-radius: var(--dsw-radius-md);
+}
+
+.candidateLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.candidateId {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--ds-font-family-code);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidateEmpty {
+  margin: 24px 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 20px;
+  text-align: center;
+}
+
+/* ---- This app's own chrome ------------------------------------------------
+ * The reference section is rendered by a page that already owns the page
+ * heading and a footer slot. This app's settings panel does not: each of its
+ * four sections renders its own `<h1>`. So the heading row, the config-path
+ * button and the loading line live here, resolving through the same alias
+ * tokens as everything above.
+ *
+ * The title is the reference's own `.title` (16/24/500) and the row is exactly
+ * that tall: dsh's heading is a bare `<h2>` in the section's flex column, so a
+ * taller row here would push the intro — and everything under it — down by the
+ * difference. */
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* The header row only has to lay the copy button out beside the title, without
+ * growing the 24px line box the title would have on its own. */
+.configPath {
+  flex: none;
+  max-width: 60%;
+  height: 24px;
+  padding: 0 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  border-radius: var(--dsw-radius-sm);
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.configPath:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+/* dsh renders both dialogs through its Modal primitive; this app's Dialog shell
+ * is bare, so the metrics Modal.module.css supplies live here: a layer-2 panel
+ * at radius-panel with the prominent elevation, a 22/14/12/24 header, 24px
+ * description and footer gutters, a 20px stack gap and the 24px bottom pad.
+ *
+ * The width is still the reference sheet's — `.deleteDialog` widens the 380px
+ * Modal default to 480, and `.fetchDialog` keeps it at 380 (its max-width 520
+ * only has to stop a longer title from widening the panel). Both need the
+ * compound selector to beat the shell's own 520px max-width. */
+.modalPanel {
+  width: min(380px, 100%);
+  max-width: none;
+  gap: 20px;
+  padding: 0 0 24px;
+  overflow: hidden;
+  border-radius: var(--dsw-radius-panel);
+  background: var(--dsw-alias-bg-layer-2);
+  box-shadow: var(--dsw-elevation-prominent);
+}
+
+.modalPanel.deleteDialog {
+  width: min(480px, 100%);
+}
+
+.modalPanel.fetchDialog {
+  max-width: 520px;
+}
+
+.modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 22px 14px 12px 24px;
+}
+
+.modalTitle {
+  margin: 0;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
+}
+
+.modalClose {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.modalClose:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.modalClose:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.modalDescription {
+  margin: 0;
+  padding: 0 24px;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.modalBody {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin-top: 20px;
+  padding: 0 24px;
+}
+
+.dialogError {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.modalFooter {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 24px;
+}
+
+.loading {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* The reference gets its checkbox from a primitives package this app does not
+ * have, so the choice row carries that package's own metrics
+ * (ui-primitives/Checkbox.module.css): a 16px native box tinted with the brand
+ * colour, a 14/20 label, and a dimmed row while disabled. */
+.modelInputChoice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+}
+
+.modelInputChoice input {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--dsw-alias-brand-primary);
+  cursor: inherit;
+}
+
+.modelInputChoice input:focus-visible {
+  outline: var(--dsw-focus-ring-width) solid
+    var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 2px;
+}
+
+.modelInputChoice:has(input:disabled) {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.modelInputChoiceDisabled {
+  color: var(--dsw-alias-label-dimmed);
+}
+
+/* A route id is an identifier, not prose: it reads in the code face, as the
+ * reference's route inputs do. */
+.inputCode {
+  font-family: var(--ds-font-family-code);
 }

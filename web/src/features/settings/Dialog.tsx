@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import clsx from "clsx";
 import styles from "./Dialog.module.css";
 
 /**
@@ -6,14 +7,20 @@ import styles from "./Dialog.module.css";
  * a stray click while typing an API key cannot discard it. Escape closes too,
  * but only when a close handler is passed — during a save it is omitted, so a
  * half-written file cannot be abandoned by a keypress.
+ *
+ * `className` is how a caller narrows the panel: dsh's delete dialog is 480px
+ * wide and its fetch picker binds its own scrollbar tokens, and both of those
+ * live in the calling section's sheet rather than here.
  */
 export function Dialog({
   onClose,
   label,
+  className,
   children,
 }: {
   onClose?: () => void;
   label: string;
+  className?: string;
   children: React.ReactNode;
 }) {
   useEffect(() => {
@@ -32,7 +39,12 @@ export function Dialog({
         if (event.target === event.currentTarget) onClose?.();
       }}
     >
-      <div className={styles.dialog} role="dialog" aria-modal="true" aria-label={label}>
+      <div
+        className={clsx(styles.dialog, className)}
+        role="dialog"
+        aria-modal="true"
+        aria-label={label}
+      >
         {children}
       </div>
     </div>

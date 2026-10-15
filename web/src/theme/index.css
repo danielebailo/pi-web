@@ -1,7 +1,7 @@
 /* Theme entry point — token sheets ported verbatim from deepseek-harness
  * (packages/client/ui-theme/src/styles/). Import order mirrors dsh's cascade:
- * base variables, static scale + semantic aliases, superellipse corners,
- * elevation shadows + typography, scrollbars, code highlighting.
+ * base variables, static scale + semantic aliases, focus rings, superellipse
+ * corners, elevation shadows + typography, scrollbars, code highlighting.
  *
  * Keep the `--dsw-*` prefix unchanged so this project stays diffable against
  * the upstream design system. Feature components must consume semantic
@@ -9,6 +9,7 @@
  */
 @import "./base.css";
 @import "./design-platform.css";
+@import "./focus.css";
 @import "./corner-shape.css";
 @import "./gradient-shadow-text.css";
 @import "./scrollbar.css";

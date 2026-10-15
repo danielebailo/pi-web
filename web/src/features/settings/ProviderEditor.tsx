@@ -1,16 +1,14 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import clsx from "clsx";
 import { Glyph } from "../../components/dsh-icons.tsx";
-import { actions, appStore, useT } from "../../lib/app-state.ts";
+import { actions, useT } from "../../lib/app-state.ts";
 // Aliased: `api` is also the name of this form's wire-protocol field, which is
 // dsh's label for it (API 协议) and not worth renaming.
 import { api as apiClient } from "../../lib/api.ts";
-import { useStore } from "../../lib/store.ts";
 import type { ModelProvider, ProviderModelEntry } from "../../lib/types.ts";
-import { Dialog } from "./Dialog.tsx";
 import { FetchModelsDialog } from "./FetchModelsDialog.tsx";
 import { formatCapacity, parseCapacity } from "./model-capacity.ts";
-import styles from "./ProviderEditor.module.css";
+import styles from "./ModelsSection.module.css";
 
 type EditorMode = "edit" | "create-known" | "create-custom";
 
@@ -41,69 +39,79 @@ type TopThinkingLevel = (typeof TOP_THINKING_LEVELS)[number];
 const DEFAULT_MODALITIES: readonly InputModality[] = ["text"];
 
 /**
+ * The sizes a person sees quoted most often. A hint, not a default: a blank
+ * field means pi decides, which is why the text is an example to type rather
+ * than a value already in effect.
+ */
+const CAPACITY_HINT: Record<CapacityField, string> = { contextWindow: "256K", maxTokens: "32K" };
+
+/**
  * One provider's editor, ported from dsh's `ProviderEditor`.
+ *
+ * dsh renders this inside its own modal; here it is the body of a card in the
+ * provider list (or of the add card), so it owns no dialog chrome — the parent
+ * decides where it sits and the CSS flattens it when that parent is a card.
  *
  * Three choices carry over from dsh and are worth stating, because each one is
  * a place a naive editor would do something convenient and wrong:
  *
  * The API key is **write-only**. The page never receives the current key, so it
  * cannot show or echo one; a save that leaves the field untouched sends no key
- * at all and the stored one survives. t("settings.provider.apiKeyConfigured") is the placeholder
- * for exactly that state.
+ * at all and the stored one survives. `apiKeyConfigured` is the placeholder for
+ * exactly that state.
  *
- * The **API address and protocol live in a collapsed 自定义设置 area**. pi knows
- * the endpoint and wire protocol for its built-in providers, so most edits only
- * need a key, and putting the two technical fields next to it would make the
- * common case look like it required them.
+ * Everything technical — the display name, the API address, the wire protocol,
+ * the model catalog — lives in a **collapsed 自定义设置 area**, because pi knows
+ * the endpoint and protocol of its built-in providers: most edits only need a
+ * key, and putting the rest next to it would make the common case look like it
+ * required them. The one exception is a hand-declared provider, which has no
+ * default to fall back on; that card opens the area instead of hiding it.
  *
  * **Reasoning is a per-model checkbox, not a provider-wide setting** — dsh's
  * reason for leaving it out altogether still holds: the capability belongs to
  * the model, and models under one provider disagree about it, so a
  * provider-scoped control could only offer values some of them reject. Putting
  * it on the row is the narrow version of the same conclusion, and the only
- * place it can be said at all: no catalog endpoint reports it (the server tries
- * anyway — see `catalogReasons`), and without it the model gets no thinking
- * levels in the composer.
+ * place it can be said at all: no catalog endpoint reports it, and without it
+ * the model gets no thinking levels in the composer.
  */
 export function ProviderEditor({
   mode,
   provider,
-  knownProviders,
+  knownId,
+  taken,
   apiProtocols,
+  onBusyChange,
   onClose,
 }: {
   mode: EditorMode;
-  provider: ModelProvider | null;
-  knownProviders: string[];
-  apiProtocols: string[];
+  /** The provider being edited; only `mode === "edit"` has one. */
+  provider?: ModelProvider | undefined;
+  /** The catalog provider being added; only `mode === "create-known"` has one. */
+  knownId?: string | undefined;
+  /** Every id already in the file, which a new custom route must not repeat. */
+  taken: readonly string[];
+  apiProtocols: readonly string[];
+  /** Reports work in flight so the add card can hold its mode switch still. */
+  onBusyChange?: ((busy: boolean) => void) | undefined;
   onClose: () => void;
 }) {
   const t = useT();
-  const state = useStore(appStore);
-  const existing = new Set((state.models?.providers ?? []).map((p) => p.id));
+  const creating = mode !== "edit";
+  const known = mode === "create-known";
+  /** A known provider's id and name belong to pi; a declared one's are ours. */
+  const ownsIdentity = !known;
 
-  const [id, setId] = useState(provider?.id ?? "");
-  const [name, setName] = useState(provider?.name ?? "");
+  const [id, setId] = useState(provider?.id ?? knownId ?? "");
+  const [name, setName] = useState(provider?.name ?? knownId ?? "");
   // Always empty: the current key is not ours to prefill.
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState(provider?.baseUrl ?? "");
   const [api, setApi] = useState(provider?.api ?? "");
   const [models, setModels] = useState<ProviderModelEntry[]>(provider?.models ?? []);
-  // Which rows show their capacity and input-type fields. Kept per index rather
-  // than per model id, because a row being typed into has no id yet.
-  const [expandedRows, setExpandedRows] = useState<ReadonlySet<number>>(new Set());
-  // Capacity fields are edited as text, so a field's keystrokes are held here
-  // rather than re-derived from the parsed count on every change — that would
-  // rewrite `1000000` to `1M` mid-word. Unreadable text is kept past blur so the
-  // refusal names a row the user can still see, which is why this is one entry
-  // PER FIELD: a single buffer would be displaced by editing any other field,
-  // and the abandoned one would render its stored NaN as the literal `NaN`.
-  const [capacityDrafts, setCapacityDrafts] = useState<ReadonlyMap<string, string>>(new Map());
-  // Open when the provider already has something in there, or when the user is
-  // creating one by hand and cannot get a working provider without it.
-  const [advancedOpen, setAdvancedOpen] = useState(
-    mode === "create-custom" || provider?.baseUrl != null || (provider?.models.length ?? 0) > 0,
-  );
+  // Open when the user is declaring a provider by hand and cannot get a working
+  // one without these fields; closed otherwise, because pi already knows them.
+  const [advancedOpen, setAdvancedOpen] = useState(mode === "create-custom");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Model discovery runs against the values currently in the form, not a saved
@@ -112,18 +120,30 @@ export function ProviderEditor({
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [fetched, setFetched] = useState<ProviderModelEntry[] | null>(null);
 
-  const creating = mode !== "edit";
-  const known = mode === "create-known";
-  const idLocked = !creating || known;
+  // The add card must not let the user switch panels out from under a request
+  // that is already talking to a provider.
+  const pending = busy || fetching;
+  useEffect(() => {
+    onBusyChange?.(pending);
+  }, [pending, onBusyChange]);
+  useEffect(() => () => onBusyChange?.(false), [onBusyChange]);
 
   const idProblem = ((): string | null => {
-    if (id.length === 0) return creating ? t("settings.provider.idRequired") : null;
-    if (!/^[a-z][a-z0-9-]*$/.test(id)) {
-      return t("settings.provider.idRule");
-    }
-    if (creating && existing.has(id)) return t("settings.provider.idTaken");
+    if (mode !== "create-custom") return null;
+    if (id.trim().length === 0) return t("settings.provider.idRequired");
+    if (!/^[a-z][a-z0-9-]*$/.test(id.trim())) return t("settings.provider.idRule");
+    if (taken.includes(id.trim())) return t("settings.provider.idTaken");
     return null;
   })();
+
+  // A pristine field is not in error yet: the hint under it already says what
+  // belongs there, and a red line under an empty box reads as "you did
+  // something wrong" before the user has done anything. The rule problems show
+  // as soon as there is text to judge, which is also the moment the create
+  // button's disabled state needs explaining.
+  const shownIdProblem = id.trim().length > 0 ? idProblem : null;
+
+  const unreadable = models.some((model) => hasUnreadableCapacity(model));
 
   /**
    * Ask the provider what it serves, then offer the results for selection.
@@ -168,7 +188,7 @@ export function ProviderEditor({
     }
     // An unreadable capacity is held in the row as `NaN` so the user can see and
     // fix it; it must not reach the wire, where JSON turns it into `null`.
-    if (models.some((model) => hasUnreadableCapacity(model))) {
+    if (unreadable) {
       setError(t("settings.provider.modelCapacityInvalid"));
       return;
     }
@@ -178,16 +198,10 @@ export function ProviderEditor({
     // A key is only sent when the user typed one. `undefined` tells the server
     // to leave the stored credential alone.
     const key = apiKey.length > 0 ? { apiKey } : {};
-    const payload = {
-      name,
-      baseUrl,
-      api,
-      models,
-      ...key,
-    };
+    const payload = { name, baseUrl, api, models, ...key };
 
     const request = creating
-      ? actions.createProvider({ id, ...payload })
+      ? actions.createProvider({ id: id.trim(), ...payload })
       : actions.updateProvider(id, payload);
 
     void request
@@ -198,10 +212,190 @@ export function ProviderEditor({
       });
   };
 
+  const heading =
+    name.trim().length > 0 ? name : id.trim().length > 0 ? id : t("settings.provider.customTitle");
+
+  return (
+    <div className={styles.editor}>
+      {!known && (
+        <div className={styles.editorHeader}>
+          <span className={styles.editorTitle}>{heading}</span>
+          {name.trim().length > 0 && name !== id && (
+            <span className={styles.editorRoute}>{id}</span>
+          )}
+        </div>
+      )}
+
+      {mode === "create-custom" && (
+        <label className={styles.field}>
+          <span className={styles.fieldLabel}>{t("settings.provider.idLabel")}</span>
+          <input
+            className={clsx(styles.input, styles.inputCode)}
+            value={id}
+            aria-label={t("settings.provider.idLabel")}
+            aria-invalid={shownIdProblem !== null}
+            placeholder="my-provider"
+            onChange={(event) => setId(event.target.value)}
+          />
+          <span className={styles.advancedHint}>{t("settings.provider.fieldHint")}</span>
+          {shownIdProblem !== null && <p className={styles.error}>{shownIdProblem}</p>}
+        </label>
+      )}
+
+      <label className={styles.field}>
+        <span className={styles.fieldLabel}>{t("settings.provider.apiKey")}</span>
+        <input
+          className={styles.input}
+          type="password"
+          value={apiKey}
+          aria-label={t("settings.provider.apiKey")}
+          autoComplete="new-password"
+          placeholder={
+            provider?.configured === true
+              ? t("settings.provider.apiKeyConfigured")
+              : t("settings.provider.apiKeyPlaceholder")
+          }
+          onChange={(event) => setApiKey(event.target.value)}
+        />
+      </label>
+
+      <details
+        className={styles.customized}
+        open={advancedOpen}
+        onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}
+      >
+        <summary className={styles.customizedSummary}>{t("settings.provider.customSettings")}</summary>
+        <div className={styles.customizedBody}>
+          {ownsIdentity && mode === "edit" && (
+            <label className={styles.field}>
+              <span className={styles.fieldLabel}>{t("settings.provider.displayName")}</span>
+              <input
+                className={styles.input}
+                value={name}
+                aria-label={t("settings.provider.displayName")}
+                placeholder={id}
+                onChange={(event) => setName(event.target.value)}
+              />
+            </label>
+          )}
+
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>{t("settings.provider.baseUrl")}</span>
+            <input
+              className={styles.input}
+              value={baseUrl}
+              aria-label={t("settings.provider.baseUrl")}
+              placeholder="https://api.example.com/v1"
+              onChange={(event) => setBaseUrl(event.target.value)}
+            />
+          </label>
+
+          <label className={styles.field}>
+            <span className={styles.fieldLabel}>{t("settings.provider.apiProtocol")}</span>
+            <select
+              className={clsx(styles.input, styles.selectInput)}
+              value={api}
+              aria-label={t("settings.provider.apiProtocol")}
+              onChange={(event) => setApi(event.target.value)}
+            >
+              <option value="">{t("settings.provider.none")}</option>
+              {apiProtocols.map((protocol) => (
+                <option key={protocol} value={protocol}>{protocol}</option>
+              ))}
+            </select>
+          </label>
+
+          <ModelCatalog
+            models={models}
+            // 恢复默认 only means something when pi has a catalog to fall back
+            // to, which is exactly the case a provider is not declared by hand.
+            builtin={known || provider?.custom === false}
+            disabled={busy}
+            fetching={fetching}
+            fetchError={fetchError}
+            askable={baseUrl.trim().length > 0}
+            candidates={fetched}
+            onModelsChange={setModels}
+            onFetch={discoverModels}
+            onDismissCandidates={() => setFetched(null)}
+          />
+        </div>
+      </details>
+
+      {error !== null && <p className={styles.error}>{error}</p>}
+
+      <div className={styles.editorActions}>
+        <button type="button" className={styles.secondaryButton} onClick={onClose} disabled={busy}>
+          {t("common.cancel")}
+        </button>
+        <button
+          type="button"
+          className={styles.primaryButton}
+          onClick={submit}
+          disabled={busy || idProblem !== null || unreadable}
+        >
+          {busy
+            ? creating
+              ? t("settings.provider.creating")
+              : t("settings.provider.saving")
+            : creating
+              ? t("settings.provider.create")
+              : t("settings.provider.save")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A provider's model catalog: the rows, the discovery picker, and the two links
+ * that hang off its heading.
+ *
+ * Ported from dsh's `ModelListEditor`, and it owns the same things that one
+ * owns — which rows are expanded and what each capacity field is currently
+ * holding — because those are per-row typing state, not provider state. The
+ * list itself is lifted: the editor saves it and validates it.
+ */
+function ModelCatalog({
+  models,
+  builtin,
+  disabled,
+  fetching,
+  fetchError,
+  askable,
+  candidates,
+  onModelsChange,
+  onFetch,
+  onDismissCandidates,
+}: {
+  models: readonly ProviderModelEntry[];
+  builtin: boolean;
+  disabled: boolean;
+  fetching: boolean;
+  fetchError: string | null;
+  /** Whether the form currently names an address to ask. */
+  askable: boolean;
+  candidates: ProviderModelEntry[] | null;
+  onModelsChange: (models: ProviderModelEntry[]) => void;
+  onFetch: () => void;
+  onDismissCandidates: () => void;
+}) {
+  const t = useT();
+  // Kept per index rather than per model id, because a row being typed into has
+  // no id yet.
+  const [expandedRows, setExpandedRows] = useState<ReadonlySet<number>>(new Set());
+  // Capacity fields are edited as text, so a field's keystrokes are held here
+  // rather than re-derived from the parsed count on every change — that would
+  // rewrite `1000000` to `1M` mid-word. Unreadable text is kept past blur so the
+  // refusal names a row the user can still see, which is why this is one entry
+  // PER FIELD: a single buffer would be displaced by editing any other field,
+  // and the abandoned one would render its stored NaN as the literal `NaN`.
+  const [capacityDrafts, setCapacityDrafts] = useState<ReadonlyMap<string, string>>(new Map());
+
   /** Replace one row's editable fields, dropping any the caller cleared. */
-  const patchModel = (index: number, next: Partial<ProviderModelEntry>): void => {
-    setModels((list) =>
-      list.map((entry, at) => (at === index ? cleanedEntry({ ...entry, ...next }) : entry)),
+  const patch = (index: number, next: Partial<ProviderModelEntry>): void => {
+    onModelsChange(
+      models.map((entry, at) => (at === index ? cleanedEntry({ ...entry, ...next }) : entry)),
     );
   };
 
@@ -213,16 +407,13 @@ export function ProviderEditor({
    * rebuilding it from these checkboxes would drop every one of them.
    */
   const toggleThinkingLevel = (index: number, level: TopThinkingLevel, on: boolean): void => {
-    setModels((list) =>
-      list.map((entry, at) => {
-        if (at !== index) return entry;
-        const map = { ...(entry.thinkingLevelMap ?? {}) };
-        // Re-ticking a level keeps whatever effort it was mapped to.
-        if (on) map[level] = map[level] ?? level;
-        else delete map[level];
-        return cleanedEntry({ ...entry, thinkingLevelMap: map });
-      }),
-    );
+    const entry = models[index];
+    if (entry === undefined) return;
+    const map = { ...(entry.thinkingLevelMap ?? {}) };
+    // Re-ticking a level keeps whatever effort it was mapped to.
+    if (on) map[level] = map[level] ?? level;
+    else delete map[level];
+    patch(index, { thinkingLevelMap: map });
   };
 
   /**
@@ -240,7 +431,7 @@ export function ProviderEditor({
   const editCapacity = (index: number, field: CapacityField, text: string): void => {
     setCapacityDrafts((current) => new Map(current).set(capacityKeyOf(index, field), text));
     const parsed = parseCapacity(text);
-    patchModel(index, field === "contextWindow" ? { contextWindow: parsed } : { maxTokens: parsed });
+    patch(index, field === "contextWindow" ? { contextWindow: parsed } : { maxTokens: parsed });
   };
 
   const settleCapacity = (index: number, field: CapacityField): void => {
@@ -267,232 +458,105 @@ export function ProviderEditor({
   };
 
   const removeModel = (index: number): void => {
-    setModels((list) => list.filter((_, at) => at !== index));
+    onModelsChange(models.filter((_, at) => at !== index));
     // Both row-keyed maps shift with the list, or the row below the deleted one
     // would inherit its half-typed text and its open disclosure.
     setExpandedRows((current) => reindexRows(current, index));
     setCapacityDrafts((current) => reindexDrafts(current, index));
   };
 
-  const title =
-    mode === "edit"
-      ? t("settings.provider.editTitle", { name: provider?.name ?? id })
-      : mode === "create-custom"
-        ? t("settings.provider.customTitle")
-        : t("settings.provider.addTitle");
+  const overridden = models.length > 0;
 
   return (
-    <Dialog onClose={busy ? undefined : onClose} label={title}>
-      <h2 className={styles.title}>{title}</h2>
-
-      <div className={styles.body}>
-        {known ? (
-          <Field label={t("settings.provider.fieldLabel")} hint={t("settings.provider.fieldHint")}>
-            <select
-              className={styles.input}
-              value={id}
-              aria-label={t("settings.provider.fieldLabel")}
-              onChange={(event) => {
-                setId(event.target.value);
-                setName(event.target.value);
-              }}
-            >
-              <option value="">{t("settings.provider.none")}</option>
-              {knownProviders
-                .filter((candidate) => !existing.has(candidate))
-                .map((candidate) => (
-                  <option key={candidate} value={candidate}>
-                    {candidate}
-                  </option>
-                ))}
-            </select>
-          </Field>
-        ) : (
-          <Field label={t("settings.provider.idLabel")} hint={idLocked ? undefined : t("settings.provider.fieldHint")}>
-            <input
-              className={styles.input}
-              value={id}
-              readOnly={idLocked}
-              aria-label={t("settings.provider.idLabel")}
-              placeholder="my-provider"
-              onChange={(event) => setId(event.target.value)}
-            />
-          </Field>
+    <section className={styles.modelCatalog} aria-label={t("settings.provider.modelCatalog")}>
+      <div className={styles.modelListHead}>
+        <div className={styles.modelCatalogHeading}>
+          <span className={styles.modelCatalogTitle}>{t("settings.provider.modelCatalog")}</span>
+          <span className={styles.modelCatalogMeta}>
+            {overridden
+              ? t("settings.models.modelsCustomized")
+              : builtin
+                ? t("settings.models.modelsInherited")
+                : null}
+          </span>
+        </div>
+        {overridden && builtin && (
+          <button
+            type="button"
+            className={styles.linkButton}
+            disabled={disabled}
+            onClick={() => onModelsChange([])}
+          >{t("settings.models.resetModels")}</button>
         )}
-
-        {!known && (
-          <Field label={t("settings.provider.displayName")} hint={t("settings.provider.displayNameHint")}>
-            <input
-              className={styles.input}
-              value={name}
-              aria-label={t("settings.provider.displayName")}
-              placeholder={id}
-              onChange={(event) => setName(event.target.value)}
-            />
-          </Field>
-        )}
-
-        <Field
-          label={t("settings.provider.apiKey")}
-          hint={
-            provider?.configured === true
-              ? t("settings.provider.apiKeyConfigured")
-              : t("settings.provider.apiKeyHint")
-          }
-        >
-          <input
-            className={styles.input}
-            type="password"
-            value={apiKey}
-            aria-label={t("settings.provider.apiKey")}
-            autoComplete="off"
-            placeholder={provider?.configured === true ? t("settings.provider.apiKeyConfigured") : t("settings.provider.apiKeyPlaceholder")}
-            onChange={(event) => setApiKey(event.target.value)}
-          />
-        </Field>
-
         <button
           type="button"
-          className={styles.disclosure}
-          aria-expanded={advancedOpen}
-          data-disclosure-row
-          onClick={() => setAdvancedOpen((open) => !open)}
-        >
-          <Glyph
-            name="chevronDown"
-            size={14}
-            className={advancedOpen ? styles.caretOpen : styles.caret}
-          />{t("settings.provider.customSettings")}</button>
-
-        {advancedOpen && (
-          <div className={styles.advanced}>
-            <Field
-              label={t("settings.provider.baseUrl")}
-              hint={t("settings.provider.baseUrlHint")}
-            >
-              <input
-                className={styles.input}
-                value={baseUrl}
-                aria-label={t("settings.provider.baseUrl")}
-                placeholder="https://api.example.com/v1"
-                onChange={(event) => setBaseUrl(event.target.value)}
-              />
-            </Field>
-
-            <Field label={t("settings.provider.apiProtocol")} hint={t("settings.provider.apiProtocolHint")}>
-              <select
-                className={styles.input}
-                value={api}
-                aria-label={t("settings.provider.apiProtocol")}
-                onChange={(event) => setApi(event.target.value)}
-              >
-                <option value="">{t("settings.provider.none")}</option>
-                {apiProtocols.map((protocol) => (
-                  <option key={protocol} value={protocol}>
-                    {protocol}
-                  </option>
-                ))}
-              </select>
-            </Field>
-
-            <div className={styles.modelsHeader}>
-              <span className={styles.modelsLabel}>{t("settings.provider.modelCatalog")}</span>
-              <button
-                type="button"
-                className={styles.smallButton}
-                disabled={fetching}
-                onClick={discoverModels}
-              >
-                {fetching ? t("settings.provider.fetching") : t("settings.provider.fetchModels")}
-              </button>
-              <button
-                type="button"
-                className={styles.smallButton}
-                onClick={() => setModels((list) => [...list, { id: "" }])}
-              >
-                <Glyph name="plus" size={14} />{t("settings.provider.addModel")}</button>
-            </div>
-            {fetchError !== null && <p className={styles.fetchError}>{fetchError}</p>}
-            {models.length === 0 && (
-              <p className={styles.modelsEmpty}>{t("settings.provider.catalogHint")}</p>
-            )}
-            {models.map((model, index) => (
-              <ModelRow
-                key={index}
-                model={model}
-                index={index}
-                expanded={expandedRows.has(index)}
-                contextWindow={capacityText(model, index, "contextWindow")}
-                maxTokens={capacityText(model, index, "maxTokens")}
-                onToggle={() => toggleRow(index)}
-                onIdChange={(value) => patchModel(index, { id: value })}
-                onNameChange={(value) => patchModel(index, { name: value })}
-                onCapacityChange={(field, text) => editCapacity(index, field, text)}
-                onCapacitySettle={(field) => settleCapacity(index, field)}
-                onModalitiesChange={(input) => patchModel(index, { input })}
-                onReasoningChange={(value) => patchModel(index, { reasoning: value })}
-                onThinkingLevelChange={(level, on) => toggleThinkingLevel(index, level, on)}
-                onRemove={() => removeModel(index)}
-              />
-            ))}
-          </div>
-        )}
-
-        {error !== null && <p className={styles.error}>{error}</p>}
+          className={styles.linkButton}
+          disabled={disabled || fetching || !askable}
+          // The reason the link is dead is the one thing the user needs next,
+          // and a disabled button says none of it.
+          title={askable ? undefined : t("settings.provider.needBaseUrl")}
+          onClick={onFetch}
+        >{fetching ? t("settings.provider.fetching") : t("settings.provider.fetchModels")}</button>
       </div>
 
-      {fetched !== null && (
-        <FetchModelsDialog
-          models={fetched}
-          existing={models.map((entry) => entry.id).filter((value) => value.length > 0)}
-          onAdopt={(selected) => {
-            // Existing entries are left exactly as they are; the dialog does not
-            // let them be selected, so a hand-edited contextWindow survives a
-            // discovery round.
-            setModels((list) => {
-              const byId = new Map(
-                list.filter((entry) => entry.id.length > 0).map((entry) => [entry.id, entry]),
-              );
-              for (const entry of selected) byId.set(entry.id, entry);
-              return [...byId.values()];
-            });
-            setFetched(null);
-          }}
-          onClose={() => setFetched(null)}
-        />
+      {models.length === 0 ? (
+        <p className={styles.modelEmpty}>{t("settings.models.modelsEmpty")}</p>
+      ) : (
+        <div className={styles.modelList}>
+          {models.map((model, index) => (
+            <ModelRow
+              key={index}
+              model={model}
+              index={index}
+              expanded={expandedRows.has(index)}
+              disabled={disabled}
+              contextWindow={capacityText(model, index, "contextWindow")}
+              maxTokens={capacityText(model, index, "maxTokens")}
+              onToggle={() => toggleRow(index)}
+              onIdChange={(value) => patch(index, { id: value })}
+              onNameChange={(value) => patch(index, { name: value })}
+              onCapacityChange={(field, text) => editCapacity(index, field, text)}
+              onCapacitySettle={(field) => settleCapacity(index, field)}
+              onModalitiesChange={(input) => patch(index, { input })}
+              onReasoningChange={(value) => patch(index, { reasoning: value })}
+              onThinkingLevelChange={(level, on) => toggleThinkingLevel(index, level, on)}
+              onRemove={() => removeModel(index)}
+            />
+          ))}
+        </div>
       )}
 
-      <div className={styles.actions}>
-        <button type="button" className={styles.ghostButton} onClick={onClose} disabled={busy}>{t("common.cancel")}</button>
-        <button
-          type="button"
-          className={clsx(styles.primaryButton)}
-          onClick={submit}
-          disabled={busy || idProblem !== null}
-        >
-          {busy ? (creating ? t("settings.provider.creating") : t("settings.provider.saving")) : creating ? t("settings.provider.create") : t("common.save")}
-        </button>
-      </div>
-    </Dialog>
-  );
-}
+      <button
+        type="button"
+        className={styles.addModelButton}
+        disabled={disabled}
+        onClick={() => onModelsChange([...models, { id: "" }])}
+      >
+        <Glyph name="plus" size={14} />{t("settings.provider.addModel")}</button>
 
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  const t = useT();
-  return (
-    <label className={styles.field}>
-      <span className={styles.fieldLabel}>{label}</span>
-      {hint !== undefined && <span className={styles.fieldHint}>{hint}</span>}
-      {children}
-    </label>
+      {fetchError !== null && <p className={styles.error}>{fetchError}</p>}
+
+      {candidates !== null && (
+        <FetchModelsDialog
+          models={candidates}
+          existing={models.map((entry) => entry.id).filter((value) => value.length > 0)}
+          onAdopt={(selected) => {
+            // An entry that is already in the catalog wins over the provider's
+            // version of it, so a hand-edited contextWindow survives a
+            // discovery round — and so does a row the user is still filling in.
+            const known = new Set(
+              models.map((entry) => entry.id).filter((id) => id.length > 0),
+            );
+            onModelsChange([
+              ...models,
+              ...selected.filter((entry) => !known.has(entry.id)),
+            ]);
+            onDismissCandidates();
+          }}
+          onClose={onDismissCandidates}
+        />
+      )}
+    </section>
   );
 }
 
@@ -514,6 +578,7 @@ function ModelRow({
   model,
   index,
   expanded,
+  disabled,
   contextWindow,
   maxTokens,
   onToggle,
@@ -529,6 +594,7 @@ function ModelRow({
   model: ProviderModelEntry;
   index: number;
   expanded: boolean;
+  disabled: boolean;
   /** Field text, which is the typed buffer while the user is in it. */
   contextWindow: string;
   maxTokens: string;
@@ -554,6 +620,7 @@ function ModelRow({
         <input
           className={styles.input}
           value={model.id}
+          disabled={disabled}
           aria-label={t("settings.provider.modelIdLabel", { index: index + 1 })}
           placeholder={t("settings.provider.modelId")}
           onChange={(event) => onIdChange(event.target.value)}
@@ -561,49 +628,42 @@ function ModelRow({
         <input
           className={styles.input}
           value={model.name ?? ""}
+          disabled={disabled}
           aria-label={t("settings.provider.modelNameLabel", { index: index + 1 })}
           placeholder={t("settings.provider.modelNamePlaceholder")}
           onChange={(event) => onNameChange(event.target.value)}
         />
         <button
           type="button"
-          className={styles.iconToggle}
+          className={styles.iconButton}
           aria-expanded={expanded}
           aria-label={t("settings.provider.modelAdvancedLabel", { index: index + 1 })}
           title={t("settings.provider.modelAdvanced")}
           onClick={onToggle}
         >
-          <Glyph
-            name="chevronDown"
-            size={14}
-            className={expanded ? styles.caretOpen : styles.caret}
-          />
+          <Glyph name={expanded ? "chevronDownOutline" : "chevronRightOutline"} size={14} />
         </button>
         <button
           type="button"
-          className={styles.iconButton}
+          className={clsx(styles.iconButton, styles.iconButtonDanger)}
+          disabled={disabled}
           aria-label={t("settings.provider.removeModel", { index: index + 1 })}
           onClick={onRemove}
         >
-          <Glyph name="trash" size={16} />
+          <Glyph name="trash" size={14} />
         </button>
       </div>
 
       {expanded && (
         <div className={styles.modelAdvanced}>
-          {/*
-            The placeholders are the sizes a person sees quoted most often, not
-            a claim about this model: a blank field means pi decides, which is
-            why the text is set as an example to type rather than a default that
-            is already in effect.
-          */}
           <label className={styles.modelField}>
             <span className={styles.modelFieldLabel}>{t("settings.provider.contextWindow")}</span>
             <input
               className={styles.input}
               inputMode="numeric"
               value={contextWindow}
-              placeholder="256K"
+              disabled={disabled}
+              placeholder={CAPACITY_HINT.contextWindow}
               aria-label={t("settings.provider.contextWindowLabel", { index: index + 1 })}
               onChange={(event) => onCapacityChange("contextWindow", event.target.value)}
               onBlur={() => onCapacitySettle("contextWindow")}
@@ -615,7 +675,8 @@ function ModelRow({
               className={styles.input}
               inputMode="numeric"
               value={maxTokens}
-              placeholder="32K"
+              disabled={disabled}
+              placeholder={CAPACITY_HINT.maxTokens}
               aria-label={t("settings.provider.maxTokensLabel", { index: index + 1 })}
               onChange={(event) => onCapacityChange("maxTokens", event.target.value)}
               onBlur={() => onCapacitySettle("maxTokens")}
@@ -627,14 +688,22 @@ function ModelRow({
             </legend>
             <div className={styles.modelInputChoices}>
               {INPUT_MODALITIES.map((modality) => (
-                <label key={modality} className={styles.modelInputChoice}>
+                <label
+                  key={modality}
+                  className={clsx(
+                    styles.modelInputChoice,
+                    disabled || onlySelected === modality
+                      ? styles.modelInputChoiceDisabled
+                      : undefined,
+                  )}
+                >
                   <input
                     type="checkbox"
                     checked={selected.includes(modality)}
                     // The last remaining type cannot be unchecked: a model that
                     // accepts nothing is not a state pi can express, so the
                     // refusal is here rather than in a save-time error.
-                    disabled={onlySelected === modality}
+                    disabled={disabled || onlySelected === modality}
                     onChange={(event) => {
                       onModalitiesChange(
                         INPUT_MODALITIES.filter((value) =>
@@ -666,6 +735,7 @@ function ModelRow({
                 <input
                   type="checkbox"
                   checked={model.reasoning === true}
+                  disabled={disabled}
                   aria-label={t("settings.provider.modelReasoningLabel", { index: index + 1 })}
                   onChange={(event) => onReasoningChange(event.target.checked)}
                 />
@@ -674,7 +744,12 @@ function ModelRow({
               {TOP_THINKING_LEVELS.map((level) => (
                 <label
                   key={level}
-                  className={styles.modelInputChoice}
+                  className={clsx(
+                    styles.modelInputChoice,
+                    disabled || model.reasoning !== true
+                      ? styles.modelInputChoiceDisabled
+                      : undefined,
+                  )}
                   title={t("settings.provider.modelTopLevelsHint")}
                 >
                   <input
@@ -685,7 +760,7 @@ function ModelRow({
                     checked={typeof model.thinkingLevelMap?.[level] === "string"}
                     // No ladder to climb without reasoning: the two belong to
                     // the same statement, so the boxes move together.
-                    disabled={model.reasoning !== true}
+                    disabled={disabled || model.reasoning !== true}
                     aria-label={t("settings.provider.modelLevelLabel", {
                       level,
                       index: index + 1,

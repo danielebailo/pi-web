@@ -45,6 +45,12 @@ interface GlyphDef {
   strokeWidth?: number;
   /** dsh's tree glyphs round their corners; the rest of its stroked set does not. */
   strokeLinejoin?: "round";
+  /**
+   * The end cap of the glyph's stroked paths. This table renders round ends by
+   * default, the convention `icons.tsx` set; dsh's own outline artwork is
+   * square ended, so a mark that has to line up with it declares `butt`.
+   */
+  strokeLinecap?: "round" | "butt";
   evenOdd?: boolean;
 }
 
@@ -55,6 +61,26 @@ const GLYPHS = {
       "M11.8486 5.5L11.4238 5.92383L8.69727 8.65137C8.44157 8.90706 8.21562 9.13382 8.01172 9.29785C7.79912 9.46883 7.55595 9.61756 7.25 9.66602C7.08435 9.69222 6.91565 9.69222 6.75 9.66602C6.44405 9.61756 6.20088 9.46883 5.98828 9.29785C5.78438 9.13382 5.55843 8.90706 5.30273 8.65137L2.57617 5.92383L2.15137 5.5L3 4.65137L3.42383 5.07617L6.15137 7.80273C6.42595 8.07732 6.59876 8.24849 6.74023 8.3623C6.87291 8.46904 6.92272 8.47813 6.9375 8.48047C6.97895 8.48703 7.02105 8.48703 7.0625 8.48047C7.07728 8.47813 7.12709 8.46904 7.25977 8.3623C7.40124 8.24849 7.57405 8.07732 7.84863 7.80273L10.5762 5.07617L11 4.65137L11.8486 5.5Z",
     ],
   },
+  /**
+   * `IconChevronDownOutline16` — the model row's expanded disclosure. dsh draws
+   * this row with its outline chevrons rather than the filled 14px marks the
+   * rest of the app discloses with.
+   */
+  chevronDownOutline: {
+    viewBox: "0 0 16 16",
+    strokeWidth: 1,
+    strokeLinecap: "butt",
+    paths: ["M4 6L7.29289 9.29289C7.68342 9.68342 8.31658 9.68342 8.70711 9.29289L12 6"],
+  },
+
+  /** `IconChevronRightOutline16` — the same row while it is collapsed. */
+  chevronRightOutline: {
+    viewBox: "0 0 16 16",
+    strokeWidth: 1,
+    strokeLinecap: "butt",
+    paths: ["M6 12L9.29289 8.70711C9.68342 8.31658 9.68342 7.68342 9.29289 7.29289L6 4"],
+  },
+
   terminal: {
     viewBox: "0 0 14 14",
     paths: [
@@ -174,6 +200,7 @@ const GLYPHS = {
   trash: {
     viewBox: "0 0 16 16",
     strokeWidth: 1,
+    strokeLinecap: "butt",
     paths: [
       "M1.28149 3.88831H14.7187",
       "M5.41602 3.88833V2.47962C5.41602 2.29282 5.52492 2.11366 5.71876 1.98157C5.9126 1.84948 6.17551 1.77527 6.44964 1.77527H9.55053C9.82466 1.77527 10.0876 1.84948 10.2814 1.98157C10.4753 2.11366 10.5842 2.29282 10.5842 2.47962V3.88833",
@@ -352,6 +379,17 @@ const GLYPHS = {
   },
 
   /**
+   * `IconCloseOutline16` — a dialog header's close button. A wider cross than
+   * `closeFill`, which is inset by a pixel for the search fields.
+   */
+  closeOutline: {
+    viewBox: "0 0 16 16",
+    strokeWidth: 1,
+    strokeLinecap: "butt",
+    paths: ["M2.5 2.5L13.5 13.5", "M13.5 2.5L2.5 13.5"],
+  },
+
+  /**
    * `IconEditOutline16` — rename. One of dsh's two half-and-half glyphs: the
    * sheet is filled, the pen stroke over it is not.
    */
@@ -498,6 +536,7 @@ export function Glyph({
   // than inferred from the name.
   const glyphStrokeWidth = "strokeWidth" in glyph ? (glyph.strokeWidth as number) : null;
   const strokeLinejoin = "strokeLinejoin" in glyph ? glyph.strokeLinejoin : undefined;
+  const strokeLinecap = "strokeLinecap" in glyph ? glyph.strokeLinecap : "round";
   const circles = "circles" in glyph ? (glyph.circles ?? []) : [];
   const evenOdd = "evenOdd" in glyph && glyph.evenOdd === true;
   return (
@@ -529,7 +568,7 @@ export function Glyph({
             fill="none"
             stroke="currentColor"
             strokeWidth={glyphStrokeWidth ?? 1}
-            strokeLinecap="round"
+            strokeLinecap={strokeLinecap}
             strokeLinejoin={strokeLinejoin}
           />
         ) : (
@@ -552,6 +591,7 @@ export function Glyph({
           fill="none"
           stroke="currentColor"
           strokeWidth={glyphStrokeWidth ?? 1}
+          strokeLinecap={strokeLinecap}
         />
       ))}
     </svg>

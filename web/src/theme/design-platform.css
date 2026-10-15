@@ -33,7 +33,7 @@ body {
   --dsw-static-deepseek-100: rgb(228, 237, 253);
   --dsw-static-deepseek-200: rgb(211, 226, 255);
   --dsw-static-deepseek-300: rgb(183, 200, 254);
-  --dsw-static-deepseek-400: rgb(103, 158, 254);
+  --dsw-static-deepseek-400: rgb(122, 170, 255);
   --dsw-static-deepseek-450: rgb(86, 134, 254);
   --dsw-static-deepseek-500: rgb(65, 118, 230);
   --dsw-static-deepseek-50: rgb(237, 243, 254);
@@ -109,7 +109,7 @@ html[data-appearance="dark"] body {
   --dsw-static-deepseek-100: rgb(228, 237, 253);
   --dsw-static-deepseek-200: rgb(211, 226, 255);
   --dsw-static-deepseek-300: rgb(183, 200, 254);
-  --dsw-static-deepseek-400: rgb(103, 158, 254);
+  --dsw-static-deepseek-400: rgb(122, 170, 255);
   --dsw-static-deepseek-450: rgb(86, 134, 254);
   --dsw-static-deepseek-500: rgb(65, 118, 230);
   --dsw-static-deepseek-50: rgb(237, 243, 254);
@@ -363,13 +363,21 @@ html[data-appearance="dark"] body {
 }
 
 /* Corner radii, ported from the same upstream sheet: deepseek-harness's
-   ui-theme base.css declares these four, and every component there rounds with
-   them — a sidebar row uses `-md`, an icon button `-sm`. They are
-   theme-independent, so they live in one block rather than in each appearance
-   block above (which is where the colour tokens have to be, twice). */
+   ui-theme base.css declares these five, and every component there rounds with
+   them — a sidebar row uses `-md`, an icon button `-sm`, a settings card `-xl`.
+   They are theme-independent, so they live in one block rather than in each
+   appearance block above (which is where the colour tokens have to be, twice). */
 body {
   --dsw-radius-xs: 4px;
   --dsw-radius-sm: 8px;
   --dsw-radius-md: 12px;
   --dsw-radius-lg: 16px;
+  --dsw-radius-xl: 20px;
+  --dsw-radius-panel: 28px;
+
+  /* The settings card material, also from ui-theme's base.css. Both are
+     indirections onto colour tokens that do change with the appearance, which
+     is why they are written once here and resolve per theme at use time. */
+  --dsw-alias-settings-card-fill: var(--dsw-alias-bg-layer-2);
+  --dsw-alias-settings-card-stroke: var(--dsw-alias-border-l4);
 }

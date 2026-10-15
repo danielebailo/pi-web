@@ -9,11 +9,17 @@ import { App } from "./App.tsx";
 import { ErrorBoundary } from "./components/ErrorBoundary.tsx";
 import { appStore } from "./lib/app-state.ts";
 import { markDocumentPlatform } from "./lib/desktop.ts";
+import { watchInputModality } from "./lib/input-modality.ts";
 import { applyAppearance, watchSystemAppearance } from "./lib/theme.ts";
 
 // Before the first mount, so the macOS sidebar tint is already in force when
 // the shell paints its first frame (see the function's note).
 markDocumentPlatform();
+
+// Also before the first mount: `theme/focus.css` reads the modality attribute
+// this publishes, so a ring suppressed on click has to be suppressible from the
+// very first click (see the module's note).
+watchInputModality();
 
 const container = document.getElementById("root");
 if (!container) {
