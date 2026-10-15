@@ -3,6 +3,26 @@
 本文件记录 pi-web-simple 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.11.0] - 2026-10-15
+
+### 新增
+
+- **设置页按 dsh 重做：行是卡片，编辑器就地展开，添加入口合成一个分段控件**：设置行不再是 44px 的扁条，而是 dsh 的卡片（`--dsw-alias-settings-card-fill` / `-stroke` 一并补进主题）；编辑器不再弹窗，而是就地展开在那一行下面——同一时刻只有一张卡，点第二行的「编辑」会先把上一张收起来。添加入口从两个按钮合成一个：卡片顶上用分段控件在「第三方模型提供商」（从 pi 已认识的目录里选）与「自定义模型 API」（手写 id、地址、协议）之间切换，两块面板访问过就留在 DOM 里只做 hidden，来回切不会丢掉填了一半的内容，写入中或正在问端点时禁用切换。已在目录中的模型默认不勾选，重加也不会覆盖已有条目（合入时已有的条目赢）。焦点环改由新增的 `theme/focus.css` 与 `lib/input-modality.ts`（指针/键盘模态，`main.tsx` 在首帧前 `watchInputModality`）提供；页面标题改用 dsh 的 `.title`（16/24），配置路径按钮 28 → 24px，免得把标题行撑高。图标集补上 `strokeLinecap`（round / butt）与 dsh 的 outline chevron / close / trash 等图形，`FetchModelsDialog.module.css` 与 `ProviderEditor.module.css` 并入 `ModelsSection` 与 `SegmentedControl`。
+
+- **会话的任务模块、输入卡与队列条按 dsh 像素级对齐**：计划条不再用布局边框，改用 dsh 的菜单面 —— `--dsw-alias-border-l1` 的 elevation 描边 + `--dsw-radius-lg` + `--dsw-elevation-panel`，宽度也从写死的 748px 改成「输入卡 − 32px」（`width` 与 `max-width` 两条都写，窄窗口才守得住每侧 16px）。状态标记照 dsh 的面板走 `StateDot`（10px 槽里一颗 6px 实心点，进行中是 14px 双圆环呼吸并旋转，`reduced-motion` 下停成固定弧），header 换成 dsh 的 `checklistOutline` 与 `chevronDownOutline`（折叠时旋转 180°——dsh 的 up 箭头正好是 down 箭头关于中心的镜像）。转录里的 diff 卡换成 dsh 的 `DetailItem` 语言：`+` / `−` / 勾 / 播放、10px 圆角方框，每行右侧跟状态词（旧 → 新、已移动），卡片自身不带 padding、每行 10px/14px 内缩加发丝线。输入卡的 max-width 改成内容宽 + 32px，三处侧沟槽 24 → 16px（与 dsh 的 `--dsh-composer-side-clearance` 同值），队列条换成 dsh 的 `.panel` 形态（上圆角、`::before` 铺菜单面、`::after` 画 0.5px 描边、下压输入卡 3px）。主题补 `--dsw-alias-state-idle-primary`，图标集新增 `checklistOutline` 与 `play`。
+
+- **消息操作行按 dsh 对齐：最新一段常驻，更早的行悬停或聚焦才浮现**（dsh 的 `data-actions-reveal` + `endsWithResponse`）：复制 / 分支 / 用量 / 用时 / 时间的尺寸、圆角、间距逐条对齐，图标随字号轴缩放；用量从静态数字改成可点开的 `StatPanel`（缓存命中率加四个分桶，每个都在本轮内求和）；时间戳的三段式由新增的 `useCalendarDay` 供「今天」并跨午夜自动对表；行内说明文字换成自绘 `Tooltip`（portal 到 body，定位交给纯算术的 `tooltip-position`）；复制确认改用 dsh 的 1 秒窗口 —— 飞行中的重复点击不排队，失败不显示勾。
+
+### 变更
+
+- **字号轴的范围与默认值对齐 dsh：10–22、默认 14（原 12/17/15），变量改写到 `body`**：dsh 的真源是 `theme-settings.ts` 的 `FONT_SIZE_MIN` / `MAX` / `DEFAULT`，而本项目此前是 12/17/15，还有几处注释与文档把 dsh 的范围写成了 12–17——这次先纠正溯源，再对齐数值：`server/src/store.ts` 的三个常量、`web/src/lib/types.ts` 的边界、`DEFAULT_SETTINGS.contentFontSize`（15 → 14），以及 `theme/index.css` 里 `:root` 的固定值（第一帧在 `/api/settings` 返回之前就画出来了，两处必须一致）一起改。`applyContentFontSize` 从 `documentElement` 改写到 `body`：dsh 的 boot 脚本与 `ThemePresenter` 都写在 body 上，派生变量（`--dsh-content-font-delta` 等）也是在 body 块里算的。已存设置里的旧值不受影响，只有越界值会被夹到新范围。
+
+### 修复
+
+- **展开工作区不再把该工作区的整个历史重读一遍**：侧栏的工作区列表是 pi 的 `SessionManager.list` 派生的，它为每个 `.jsonl` 流式读完整文件、逐行 `JSON.parse`，只为算出标题、消息数和最后活动时间。原来的缓存是**整目录**粒度：目录里任何一个会话被写过，整个目录就重解析一遍。实测展开 pi-web-simple 自己的工作区（102 个会话 / 178MB）冷读 **672ms**，而 `sessions_changed` 之后（也就是你正在用的那个工作区每写一条消息）又是 672ms。现在缓存降到**按文件**：先 stat 目录拿到每个文件的 `大小|mtime`（102 个文件 **1.2ms**），只有签名变了的文件需要重解析——什么都没变 **0.9–1.5ms**，动过其中一个文件 **67ms**（单个文件的解析成本 5–76ms）。**没有复刻 pi 的派生语义**：变化的文件被符号链接进一个临时目录，交给 pi 自己的 `list` 去读，逐字段与整目录列出对照（新增的用例就是拿 pi 的结果做 `toEqual`）。临时目录这条路有三个边界，都写成了回落：pi 对「自定义目录」会按 header 的 `cwd` 过滤，任何一个喂进去的文件没出现在结果里（被过滤、链接失败、读不了）就退回整目录读一次，并把那次权威答案（连同 pi 主动跳过的文件）按文件记下，不会每次请求都回退；目录的现况负责删除对账——不在名单里的缓存条目直接丢掉；同一目录的并发请求排队等前一次读完，而不是各自跑一遍全量（原来的缓存只在解析完成后才写入，N 个并发冷请求会各读一遍 178MB）。桌面版支持 Windows，那里建符号链接要开发者模式，所以链接失败时退化为硬链接，跨卷再失败就走整目录那条路。
+
+- **还没列过的工作区不再先说自己「还没有会话」**：侧栏的工作区行只从 `sessions[projectId]` 画，所以「请求还在飞」与「真的一条都没有」长得一样——而首次列出正是上面那次整目录的读，于是点开一个没打开过的工作区时，屏幕先显示「还没有会话。」，0.7 秒后 5 行会话突然冒出来。现在这种工作区显示「正在载入会话列表…」，并由 `useDelayedFlag`（250ms，与转录那枚提示同一枚钩子）压住头几帧：热工作区毫秒级返回，出现又消失的提示只会闪两帧，比不显示更差。标记只在「从未列过」时打——已经有行的重载继续画旧行，不退回空态也不闪提示；读失败或被更晚的请求顶替都不会把提示留在屏幕上（只有最新那次请求能清它）。**它只解释等待，不缩短等待**：服务端重启后第一次展开仍然要付那次冷读。
+
 ## [0.10.0] - 2026-10-15
 
 ### 新增
