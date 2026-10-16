@@ -3,6 +3,14 @@
 本文件记录 pi-web-simple 的显著变更。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.12.0] - 2026-10-16
+
+### 新增
+
+- **预览文件时多了一个「打开方式」分体按钮与本机应用列表（dsh 的 `ui-open-in-app`）**：预览头最右（重新载入之后）是本机打开的分体按钮——主按钮用系统默认应用打开，措辞是「用 Xcode 打开」，箭头列出这台机器上注册为这个文件类型的应用（真实图标、默认那个标「（默认）」），最后一行固定「显示文件位置」；不能预览的文件在空态画同一个控件的放大形态（36px、带「打开」两个字）。同一个文件的头部与空态共用一次查询（`useOpenWith`），列表还在读时按钮显示 13px 灰块并禁用，指针与键盘手势共用同一个 in-flight 锁，所以连点不会打开两次。几何与文案按 dsh：24px 分体、0.5px 边框、11px 字、菜单行 28px、应用图标 14px、最后一行前一条分隔线。应用列表来自 macOS 的 LaunchServices（`server/src/open-with.ts` 里一段 JXA 脚本走 `osascript -l JavaScript` 读 `NSWorkspace` 的 `URLsForApplicationsToOpenURL`）：同名同 bundle 的副本（自更新留下的 staging、多版本安装）合并成系统默认那一个、否则留版本最高的，图标是 `NSWorkspace` 现画的 32px PNG。应用目录只查 `/Applications` 与 `~/Applications`（与 dsh 相同，不去问全量注册表），所以装在别处的 app 不在菜单里，新装的要刷新页面。
+
+- **打开与显示位置都先过读文件那道闸门，主机拒绝是一句话而不是一次失败**：前端只发工作区相对路径，服务端用 `resolveWorkspaceFile`（项目内 realpath + 前缀判定）解析——实测 `path=../../../etc/passwd` 在任何系统调用之前就返回 403；请求体的 `action` 是闭集（`open` | `reveal`），`application` 只对 `open` 有效，`reveal` 带上它会被拒绝。`.html`/`.svg` 的默认打开会先试默认浏览器（macOS 读 LaunchServices 里 `https` 那个 handler），`reveal` 是 `open -R` / `explorer.exe /select,`（退出码 1 算「已交给桌面进程」）/ `xdg-open` 父目录。主机拒绝（`{"ok":false,"error":…}`）与超时都不变成 HTTP 错误，而是头部下面一行原话（自带「关闭」——本项目没有 toast 层，而一句会自己消失的话不适合表达「桌面拒绝了」）：「没有可用的桌面」是一个答案，不是一次故障。**与 dsh 有意不同的一处**：dsh 在没有任何关联应用时把主按钮变成「显示文件位置」并去掉箭头，而这里只有 macOS 答得出关联查询（Windows/Linux 用的是注册表与 GIO，本机验证不到，所以没有带一份测不了的清单），照搬会让默认打开方式彻底没有入口——因此主按钮永远是「打开」（没有列表时措辞是「用默认应用打开」），「显示文件位置」永远在菜单最后一行。主机判断按 dsh：`SSH_CONNECTION`/`SSH_TTY` 非空，或 Linux 没有 `DISPLAY`/`WAYLAND_DISPLAY` 时一个控件也不画。
+
 ## [0.11.0] - 2026-10-15
 
 ### 新增
