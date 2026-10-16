@@ -474,6 +474,48 @@ export interface WorkspaceFileContent {
 }
 
 /**
+ * One application the host's desktop can open a file with.
+ *
+ * `id` is the host's own identity for it — a macOS bundle path — and is what an
+ * "open with this one" request names. It is validated on the host against the
+ * current registration list, so an id that has gone stale is refused rather
+ * than launched.
+ */
+export interface NativeApplication {
+  id: string;
+  name: string;
+  /** Whether the operating system would pick this one for this file. */
+  default: boolean;
+  /** A `data:image/png;base64,…` icon, or null when the host could not read one. */
+  icon: string | null;
+}
+
+/**
+ * What this host can open one file with.
+ *
+ * `desktop: false` is the headless answer, and the only one that draws no
+ * controls: there is nothing on the other end to hand a path to. An empty
+ * `applications` list is not that — the desktop still opens and still reveals,
+ * it just cannot say what the file is associated with.
+ */
+export interface FileApplications {
+  desktop: boolean;
+  applications: NativeApplication[];
+}
+
+/**
+ * The answer to an open or reveal gesture.
+ *
+ * `ok: false` carries the host's own sentence about what went wrong — the
+ * desktop refused, the application is gone — because that is the one thing the
+ * client cannot work out for itself.
+ */
+export interface OpenFileResult {
+  ok: boolean;
+  error?: string;
+}
+
+/**
  * One page of a text file, for files too large to hand over whole.
  *
  * Addressed by the byte offset the previous page ended at rather than by line

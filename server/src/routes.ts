@@ -44,8 +44,17 @@ import {
   readWorkspaceFile,
   readWorkspaceRaw,
   readWorkspaceTextPage,
+  resolveWorkspaceFile,
   listWorkspaceDirectory,
 } from "./workspace-files.ts";
+import {
+  canOpenNatively,
+  listFileApplications,
+  openFileWithApplication,
+  openFileWithDefault,
+  revealFile,
+  type NativeApplication,
+} from "./open-with.ts";
 import { DEFAULT_LIMIT, searchWorkspaceFiles } from "./file-search.ts";
 import { TerminalManager, type TerminalHost } from "./terminal.ts";
 import { pendingUiRequests, type PendingUiRequests } from "./ui-requests.ts";
@@ -129,6 +138,34 @@ export interface RequestContext {
 
 type Handler = (ctx: RequestContext) => Promise<void> | void;
 
+/**
+ * The host-side half of "open with": what this machine's desktop can do with
+ * one file.
+ *
+ * An interface rather than four imports at the call sites, because a route test
+ * has to be able to say what was launched without launching it — the same
+ * reason the terminal routes take a host.
+ */
+export interface OpenWithHost {
+  /** Whether a desktop can take a launch at all. */
+  canOpen(): boolean;
+  /** The applications registered for this file, in the operating system's order. */
+  applications(absolutePath: string): Promise<NativeApplication[]>;
+  /** Open with the default application, or with the named one. */
+  open(absolutePath: string, application: string | null): Promise<void>;
+  /** Show the file in the desktop's file manager. */
+  reveal(absolutePath: string): Promise<void>;
+}
+
+/** The real desktop, which is what the server and the app both want. */
+const nativeOpenWith: OpenWithHost = {
+  canOpen: canOpenNatively,
+  applications: (absolutePath) => listFileApplications(absolutePath),
+  open: (absolutePath, application) =>
+    application === null ? openFileWithDefault(absolutePath) : openFileWithApplication(absolutePath, application),
+  reveal: (absolutePath) => revealFile(absolutePath),
+};
+
 interface Route {
   method: string;
   segments: string[];
@@ -160,6 +197,12 @@ export interface RouteDeps {
    * cares about which shell the routes ask for rather than about the shell.
    */
   terminals?: TerminalHost;
+  /**
+   * The desktop behind `/api/projects/:id/file/open`. Defaults to this host's
+   * own opener; a test supplies a stand-in when it cares about what was
+   * launched rather than about launching it.
+   */
+  openWith?: OpenWithHost;
 }
 
 function json(res: ServerResponse, status: number, payload: unknown): void {
@@ -678,6 +721,7 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
   const sessionRoot = deps.sessionRoot ?? getSessionRoot();
   const uiRequests = deps.uiRequests ?? pendingUiRequests;
   const terminals = deps.terminals ?? new TerminalManager({ bus });
+  const openWith = deps.openWith ?? nativeOpenWith;
   const routes: Route[] = [];
 
   const route = (method: string, path: string, handler: Handler): void => {
@@ -1406,6 +1450,71 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
       "x-content-type-options": "nosniff",
     });
     await pipeline(createReadStream(file.absolutePath), res);
+  });
+
+  /**
+   * The applications this machine can open one workspace file with.
+   *
+   * `desktop: false` is the headless answer — an ssh session, a container — and
+   * the one case where the preview hides its controls: a button that would spawn
+   * an opener into nothing is worse than no button, which is the line dsh draws
+   * too. An empty `applications` list is *not* that case: a platform with no
+   * association query still opens and still reveals, so the list is empty and
+   * the menu is the rest of what the buttons do.
+   */
+  route("GET", "/api/projects/:id/file/applications", async ({ res, params, query }) => {
+    const project = await getProject(params.id!);
+    const path = query.get("path") ?? "";
+    if (path.length === 0) throw badRequest("path is required");
+    const file = await resolveWorkspaceFile(project.path, path);
+    if (!openWith.canOpen()) {
+      json(res, 200, { desktop: false, applications: [] });
+      return;
+    }
+    json(res, 200, {
+      desktop: true,
+      applications: await openWith.applications(file.absolutePath),
+    });
+  });
+
+  /**
+   * Open one workspace file, or show where it is.
+   *
+   * A launch the desktop refused answers 200 with `ok: false` rather than an
+   * HTTP error: the gesture arrived and the desktop said no, which is a sentence
+   * for the reader where a failed request would be a broken panel. The path goes
+   * through the same resolver the preview reads through, so the file the
+   * operating system is handed is the file the API already agreed to serve.
+   */
+  route("POST", "/api/projects/:id/file/open", async ({ res, params, body }) => {
+    const project = await getProject(params.id!);
+    const payload = asObject(body);
+    const path = payload.path;
+    if (typeof path !== "string" || path.length === 0) throw badRequest("path is required");
+    const action = payload.action;
+    if (action !== "open" && action !== "reveal") {
+      throw badRequest("action must be open or reveal");
+    }
+    const application = payload.application;
+    if (application !== undefined && typeof application !== "string") {
+      throw badRequest("application must be a string");
+    }
+    if (action === "reveal" && application !== undefined) {
+      throw badRequest("reveal does not take an application");
+    }
+    if (!openWith.canOpen()) {
+      json(res, 200, { ok: false, error: "这台主机没有可以打开的桌面" });
+      return;
+    }
+
+    const file = await resolveWorkspaceFile(project.path, path);
+    try {
+      if (action === "reveal") await openWith.reveal(file.absolutePath);
+      else await openWith.open(file.absolutePath, application ?? null);
+      json(res, 200, { ok: true });
+    } catch (err) {
+      json(res, 200, { ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
   /**

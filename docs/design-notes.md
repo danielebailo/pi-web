@@ -743,3 +743,15 @@ pi 自己的 loader（`dist/extensions/mcp/config.js` 的 `loadMcpConfig` / `upd
 **模式 chip 的位置和显示条件也是 dsh 的规则。** dsh 的 `PlanChip` 长在输入区的控制行里，**只在模式开启时才渲染**（`pending ? !active : active`），职责只有一件：点它执行 `/plan off`。所以这里也把徽章从会话头部搬进 `Composer` 的控制行（`PlanChip`，附件按钮旁），并且只在 `planMode` 为真时才画——进入靠 `/plan`，`/` 菜单里就列着它，与 dsh 一样。悬停/聚焦时图标从计划文档换成划掉的圆，是"按下就是关掉"这件事的说明；退出失败在 chip 旁说一句，而不是弹一条通知。**转录侧多了 dsh 的两种呈现**：一轮结束后的计划卡片（`PlanCard`，照 `PlanCards` 的形状：图标块 + 标题 + "计划 · Markdown" + 打开），与被退回的计划一起保留——卡片记录的是"提交过一份计划"，不是"批准过"；以及侧栏会话行的第三种状态：有待审批的计划时状态点变 warning、无障碍文案是「计划待审批」，时间戳的位置换成「计划审批」（dsh 的 `Plan awaiting review` / `Plan review`）。判定用服务端那张待答表（`pendingUiRequests`）而不是转录，因为"谁被打断了"是服务端唯一确知的事（见 `question-model.ts`）。
 
 **扩展命令不再画用户气泡。** pi 对扩展命令只记录命令自己写下的消息（`/plan <message>` 记的是那条需求，bare `/plan` 什么都不记），而输入框原来把用户敲的那一行原样乐观插进转录——两行对不上；`/todos` 这类不提交消息的命令更糟，留下一行永远等不到对应记录的幽灵气泡，只有刷新才能消掉。现在 `extensionCommandName()` 认出这一类文本，改走 `runCommand()`：不画乐观行，等 pi 在流里记下它自己那条再采纳。普通消息照旧乐观插入，技能与模板命令也照旧——它们本来就是 pi 展开后按普通消息记录的。
+
+### 预览里的「打开方式」与「显示文件位置」
+
+**一个文件一次查询，两个地方画它。** 预览头最右边（自动刷新与重新载入之后）是本机打开的分体按钮：主按钮「用 X 打开」，箭头列出这台机器上注册为这个文件类型的应用，最后一行固定是「显示文件位置」。同一个文件的「不能预览」空态画的是同一个控件的放大形态（36px、带「打开」两个字）。两处共用一次 `useOpenWith(projectId, path)`——同一个文件只有一份答案，问两遍既慢又可能给出两个不一样的列表；dsh 把「同一个文件 + 同一个查询函数」做成一份共享状态也是这个原因。查询失败时控件照画：主按钮退回「用默认应用打开」的措辞，菜单里多一行禁用的「无法获取应用列表」——一个问不到的列表不该让「打开」本身消失。
+
+**应用列表是主机的答案，不是前端编的。** `GET /api/projects/:id/file/applications?path=` 回 `{ desktop, applications }`：`desktop: false` 表示这台主机没有可用的桌面（SSH，或 Linux 没有 `DISPLAY`/`WAYLAND_DISPLAY`），前端据此**什么也不画**——这正是 dsh 的 `canOpenWorkspacePath` 语义。列表在 macOS 上由一段 JXA 脚本（`osascript -l JavaScript`，`NSWorkspace` 的 `URLsForApplicationsToOpenURL`）枚举，带 `default` 标记与 32px PNG 图标（`data:image/png;base64,…`）；同名同 bundle 的副本（自更新留下的 staging、多版本安装）合并成系统默认那一个，否则留版本最高的——dsh 用同一套规则。应用目录只查 `/Applications` 与 `~/Applications`（和 dsh 一样不去问 Launch Services 的全量注册表），所以装在别处的 app 不会出现在菜单里，新装的要刷新页面。
+
+**路径先过项目这道闸。** 前端只会发它已经拿到的工作区相对路径；服务端用读文件那条同一道检查解析它（`resolveWorkspaceFile` → `resolveInsideProject` 的 realpath + 前缀判定），所以 `path=../../../etc/passwd` 在任何系统调用之前就被 403 挡掉（实测过）。`action` 是个闭集（`open` | `reveal`），`application` 只对 `open` 有效，`reveal` 带上它会被拒绝——路由转发的是一个已经验证过的意图，不是一条命令。
+
+**动作是尽力而为，拒绝也是一句话。** `open` 走文件的默认应用，`.html`/`.svg` 会先试着交给默认浏览器（macOS 读 LaunchServices 里 `https` 那个 handler）；`reveal` 是 `open -R` / `explorer.exe /select,` / `xdg-open` 父目录；explorer 的退出码 1 算「已交给桌面进程」，不是失败。主机拒绝（`{"ok":false,"error":"…"}`）与超时都不变成 HTTP 错误，而是头部下面那一行字——「没有可用的桌面」是一个答案，不是一次故障。这一行自带「关闭」，因为本项目没有 toast 层，而一句会自己消失的话不适合表达「桌面拒绝了」。
+
+**和 dsh 有意不同的一处：主按钮永远是「打开」。** dsh 在没有任何关联应用时把主按钮变成「显示文件位置」并去掉箭头，因为它的主机在三个平台上都答得出关联查询。这里只有 macOS 能（见[已知限制](./known-limitations.md)），照搬会让 Windows/Linux 的默认打开方式彻底没有入口；所以菜单最后一行固定是「显示文件位置」，主按钮固定是「打开」（没有列表时用「用默认应用打开」的措辞）。其余几何与文案都对齐 dsh：24px 分体按钮、0.5px 边框、11px 字、菜单行 28px 高、应用图标 14px、默认应用标「（默认）」、最后一行前一条分隔线；列表还在读的时候按钮显示 13px 的灰块并禁用，指针与键盘手势共用同一个 in-flight 锁，所以连点不会打开两次。

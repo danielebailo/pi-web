@@ -5,6 +5,7 @@ import type {
   ComposerState,
   DirListing,
   ExtensionsView,
+  FileApplications,
   FileSearchResult,
   ForkPoint,
   ForkResult,
@@ -16,6 +17,7 @@ import type {
   McpServerDraft,
   McpView,
   ModelsView,
+  OpenFileResult,
   PendingUiDialog,
   ProjectView,
   ProviderInput,
@@ -152,6 +154,37 @@ export const api = {
    */
   workspaceRawUrl: (projectId: string, path: string): string =>
     `/api/projects/${encodeURIComponent(projectId)}/raw?path=${encodeURIComponent(path)}`,
+
+  /**
+   * What this machine can open one file with.
+   *
+   * `desktop: false` means there is no desktop to hand the path to — an ssh
+   * session, a container — and the preview draws no open control at all. An
+   * empty list is a different answer: the host has a desktop but no association
+   * query for it, so opening and revealing still work and the menu is those two
+   * actions rather than a list of applications.
+   */
+  fileApplications: (projectId: string, path: string) =>
+    request<FileApplications>(
+      `/api/projects/${encodeURIComponent(projectId)}/file/applications?path=${encodeURIComponent(path)}`,
+    ),
+
+  /**
+   * Open one file in the system's default application (or a named one), or show
+   * where it is.
+   *
+   * A refusal is an answer, not a failure: the desktop is allowed to say no, and
+   * the answer says so in words the reader can act on rather than as a broken
+   * panel.
+   */
+  openWorkspaceFile: (
+    projectId: string,
+    body: { path: string; action: "open" | "reveal"; application?: string },
+  ) =>
+    request<OpenFileResult>(`/api/projects/${encodeURIComponent(projectId)}/file/open`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
   /**
    * What the terminal tab can offer, and the shells already open for a session.
