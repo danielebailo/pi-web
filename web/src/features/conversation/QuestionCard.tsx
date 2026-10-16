@@ -35,13 +35,9 @@ import styles from "./QuestionCard.module.css";
  */
 export interface QuestionCardProps {
   pending: PendingUiRequest;
-  /** Shown above the title when the request belongs to a session that is not the open one. */
-  sessionLabel?: string;
-  /** Jumps to that session; offered only alongside `sessionLabel`. */
-  onOpenSession?: () => void;
 }
 
-export function QuestionCard({ pending, sessionLabel, onOpenSession }: QuestionCardProps) {
+export function QuestionCard({ pending }: QuestionCardProps) {
   const t = useT();
   const { request } = pending;
   const options = questionOptions(request);
@@ -211,14 +207,6 @@ export function QuestionCard({ pending, sessionLabel, onOpenSession }: QuestionC
       >
         <header className={styles.header}>
           <div className={styles.heading}>
-            {sessionLabel ? (
-              <div className={styles.eyebrow}>
-                <span className={styles.eyebrowText}>{sessionLabel}</span>
-                {onOpenSession ? (
-                  <button type="button" className={styles.eyebrowAction} onClick={onOpenSession}>{t("question.goTo")}</button>
-                ) : null}
-              </div>
-            ) : null}
             <h2 className={styles.title}>{title}</h2>
           </div>
           <div className={styles.headerActions}>

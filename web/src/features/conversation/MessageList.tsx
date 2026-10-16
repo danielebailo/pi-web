@@ -763,6 +763,14 @@ export function MessageList({
   // Follow new output only while the user is already at the bottom.
   const stickRef = useRef(true);
   /**
+   * The send this transcript has already acted on; see `ConversationView.sentAt`.
+   *
+   * Seeded with whatever the first render carries, so mounting the list — or
+   * switching to a session whose number is stale by design — is not mistaken for
+   * a send of its own.
+   */
+  const sentAtRef = useRef(view.sentAt);
+  /**
    * The same answer as `stickRef`, in the one form that can put a button on
    * screen. `applyPinned` is the only writer, so the two cannot disagree.
    */
@@ -1074,6 +1082,32 @@ export function MessageList({
     // so the ask and the button cannot drift apart.
     applyPinned(distanceFromBottom(element) < STICK_THRESHOLD_PX);
   }, [view.messages, view.partial, applyPinned]);
+
+  /**
+   * A send puts the reader back on the floor.
+   *
+   * The composer is docked at the bottom of the window, so sending while
+   * scrolled up in the transcript — reading an older answer, then deciding to
+   * say something — would otherwise leave the reader's own message below the
+   * fold and the answer streaming where they cannot see it. `sentAt` is the one
+   * signal that says *this* browser sent it: a message pi recorded from the
+   * terminal, or a row that arrives on a reload, grows `messages` without
+   * changing it, and a reader who is reading is not dragged down by someone
+   * else's message.
+   *
+   * Following resumes with it, and following means being at the bottom in this
+   * same commit — a layout effect, so the reader's own message is never painted
+   * below the fold — rather than the jump button's smooth glide: they asked for
+   * the answer, not for a tour of the transcript they just left.
+   */
+  useLayoutEffect(() => {
+    if (view.sentAt === sentAtRef.current) return;
+    sentAtRef.current = view.sentAt;
+    const element = scrollRef.current;
+    if (element === null) return;
+    applyPinned(true);
+    element.scrollTop = element.scrollHeight;
+  }, [view.sentAt, applyPinned]);
 
   /**
    * The same correction, for every change that is not a message.

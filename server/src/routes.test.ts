@@ -63,6 +63,11 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  // The stub reads these at spawn, so a test that set one must not leak it into
+  // the next process — a stale transcript, or a run left in flight, would be a
+  // confusing failure somewhere else.
+  delete process.env.STUB_MESSAGES;
+  delete process.env.STUB_KEEP_RUNNING;
   await registry.closeAll("test-cleanup");
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
@@ -504,6 +509,153 @@ describe("sessions api", () => {
     // An ordinal is only meaningful for the file version it was named with.
     const stale = await fetch(`${baseUrl}${imageUrl.replace(/v=.*$/, "v=0")}`);
     expect(stale.status).toBe(404);
+  });
+
+  it("addresses a live transcript's pictures too, out of the handle", async () => {
+    // A session mid-turn answers from pi's memory — and *that* is the switch the
+    // reader makes over and over. It used to come back with every screenshot the
+    // process still remembered: tens of megabytes parsed on the main thread,
+    // which is the 正在载入会话… the user hits when they leave a session they just
+    // prompted and come back. The file is not where those bytes are, so the
+    // handle keeps the copy the URL addresses.
+    const sessionPath = join(sessionRoot, "--live-images--", "live.jsonl");
+    await mkdir(dirname(sessionPath), { recursive: true });
+    await writeFile(
+      sessionPath,
+      `${JSON.stringify({
+        type: "session",
+        version: 3,
+        id: "live-images",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        cwd: projectRoot,
+      })}\n`,
+      "utf8",
+    );
+
+    // Deliberately bigger than any assertion below would notice if it leaked:
+    // the response has to be the transcript, not the picture it mentions.
+    const data = Buffer.alloc(150_000, 7).toString("base64");
+    process.env.STUB_MESSAGES = JSON.stringify([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "看看" },
+          { type: "image", data: "dXNlcg==", mimeType: "image/png" },
+        ],
+        timestamp: 0,
+      },
+      {
+        role: "toolResult",
+        toolCallId: "c1",
+        toolName: "read",
+        content: [{ type: "image", data, mimeType: "image/png" }],
+        isError: false,
+        timestamp: 1,
+      },
+    ]);
+
+    // Prompt it and leave the turn in flight: it stays resident for ten minutes
+    // (registry.ts) *and* its memory is still ahead of the file, so the switch
+    // back has to be answered by the process — the file does not have these
+    // turns at all.
+    process.env.STUB_KEEP_RUNNING = "1";
+    const state = await api(`/api/sessions/${encodeURIComponent(sessionPath)}/state`);
+    expect(state.status).toBe(200);
+    expect(
+      (await post(`/api/sessions/${encodeURIComponent(sessionPath)}/prompt`, { message: "看看" }))
+        .status,
+    ).toBe(200);
+
+    const url = `/api/sessions/${encodeURIComponent(sessionPath)}/messages`;
+    const text = await (await fetch(baseUrl + url)).text();
+    expect(text).not.toContain(data);
+
+    const body = JSON.parse(text) as {
+      messages: { role: string; content: Record<string, unknown>[] }[];
+    };
+    const userImage = body.messages.find((entry) => entry.role === "user")!.content[1]!;
+    expect(userImage).toMatchObject({ type: "image", data: "dXNlcg==", mimeType: "image/png" });
+
+    const toolImage = body.messages.find((entry) => entry.role === "toolResult")!.content[0]!;
+    expect(toolImage.data).toBeUndefined();
+    expect(toolImage).toMatchObject({ type: "image", mimeType: "image/png" });
+    const imageUrl = toolImage.url as string;
+    // Same ordinal space as the file's, but a version that names memory.
+    expect(imageUrl).toContain("/image/1?v=live-");
+
+    const image = await fetch(baseUrl + imageUrl);
+    expect(image.status).toBe(200);
+    expect(Buffer.from(await image.arrayBuffer()).toString("base64")).toBe(data);
+
+    // An unchanged transcript keeps its version, so coming back is a cache hit
+    // rather than a re-download of every screenshot.
+    const again = await api<{ messages: { role: string; content: Record<string, unknown>[] }[] }>(url);
+    const againUrl = again.body.messages.find((entry) => entry.role === "toolResult")!.content[0]!
+      .url;
+    expect(againUrl).toBe(imageUrl);
+
+    // The copy goes when the process does: a URL naming a transcript nobody holds
+    // any more must 404 rather than answer with whatever is at that ordinal now.
+    await post(`/api/sessions/${encodeURIComponent(sessionPath)}/stop`);
+    expect((await fetch(baseUrl + imageUrl)).status).toBe(404);
+  });
+
+  it("reads a settled session's file even while its process is resident", async () => {
+    // A process that is not working is no longer asked: pi appends every
+    // committed entry to the session file as it lands, so the file already holds
+    // the same transcript — and hauling it back out of pi means pushing every
+    // picture the process remembers over stdio, which is what made returning to
+    // a session that has settled crawl.
+    const sessionPath = join(sessionRoot, "--settled--", "settled.jsonl");
+    await mkdir(dirname(sessionPath), { recursive: true });
+    await writeFile(
+      sessionPath,
+      [
+        {
+          type: "session",
+          version: 3,
+          id: "settled-session",
+          timestamp: "2026-01-01T00:00:00.000Z",
+          cwd: projectRoot,
+        },
+        {
+          type: "message",
+          id: "u1",
+          parentId: null,
+          timestamp: "2026-01-01T00:00:01.000Z",
+          message: { role: "user", content: [{ type: "text", text: "文件的" }] },
+        },
+      ]
+        .map((entry) => `${JSON.stringify(entry)}\n`)
+        .join(""),
+      "utf8",
+    );
+    // What only the process knows: a turn the file has never seen.
+    process.env.STUB_MESSAGES = JSON.stringify([
+      { role: "user", content: [{ type: "text", text: "内存的" }], timestamp: 0 },
+    ]);
+    process.env.STUB_KEEP_RUNNING = "1";
+
+    const url = `/api/sessions/${encodeURIComponent(sessionPath)}/messages`;
+    expect((await api(`/api/sessions/${encodeURIComponent(sessionPath)}/state`)).status).toBe(200);
+
+    const settled = await api<{ messages: unknown }>(url);
+    expect(JSON.stringify(settled.body.messages)).toContain("文件的");
+    expect(JSON.stringify(settled.body.messages)).not.toContain("内存的");
+
+    // The moment a turn starts, memory is ahead of the file again and the
+    // process is the only one that can answer.
+    await post(`/api/sessions/${encodeURIComponent(sessionPath)}/prompt`, { message: "继续" });
+    const running = await api<{ messages: unknown }>(url);
+    expect(JSON.stringify(running.body.messages)).toContain("内存的");
+
+    // …and once the run ends, the file is current again, so the next switch is
+    // cheap. A flag that only ever went up would keep every later read — and
+    // every screenshot in memory — on the slow path.
+    await post(`/api/sessions/${encodeURIComponent(sessionPath)}/abort`);
+    const ended = await api<{ messages: unknown }>(url);
+    expect(JSON.stringify(ended.body.messages)).toContain("文件的");
+    expect(JSON.stringify(ended.body.messages)).not.toContain("内存的");
   });
 
   it("404s an unknown project id", async () => {

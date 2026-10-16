@@ -22,6 +22,7 @@ function view(messages: AgentMessage[], patch: Partial<ConversationView> = {}): 
     partial: null,
     undeliveredPrompts: 0,
     queue: [],
+    sentAt: 0,
     toolExecutions: {},
     isStreaming: false,
     compacting: false,

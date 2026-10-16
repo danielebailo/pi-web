@@ -1,7 +1,9 @@
 import { useMemo } from "react";
 import { api } from "./api.ts";
+import { APP_NAME } from "./brand.ts";
 import { resolveLanguage, translator, type Translate, type UiLanguage } from "./i18n/index.ts";
 import {
+  pageIsAttended,
   setNotificationBadge,
   showNotification,
   subscribeNotificationClicks,
@@ -75,6 +77,29 @@ export const SESSIONS_PAGE_SIZE = 5;
 
 export function isDraftSession(sessionPath: string | null): boolean {
   return typeof sessionPath === "string" && sessionPath.startsWith(DRAFT_PREFIX);
+}
+
+/**
+ * Whether a frame addressed to `framePath` belongs to the seat `declared`.
+ *
+ * The server fans session frames out to every tab — dialogs and notices are
+ * shared chrome (see `wantsFrame` on the server) — so what arrives is not what
+ * is being read, and every consumer of a frame has to ask this first.
+ *
+ * `declared` is the session this tab is reading: its path, its draft id while
+ * the session is still being created, or null when there is no session yet at
+ * all (the hero). An unaddressed frame (`""`) belongs to that seat either way,
+ * because pi only names a session file on its first `get_state` — a session's
+ * first question is always published before the path exists, and it is asked
+ * from the seat that is, or is about to become, a session. An addressed frame
+ * belongs only to the session it names: a card for another session's question
+ * would take the input box of someone answering something else
+ * (`pendingUiForSession`), and a notice about another session is an
+ * interruption with nothing behind it (`sessionInView`).
+ */
+export function seatOwns(declared: string | null, framePath: string): boolean {
+  if (declared === null || isDraftSession(declared)) return framePath === "";
+  return framePath === declared;
 }
 
 /**
@@ -1208,6 +1233,16 @@ export const actions = {
           selectedSessionPath:
             state.selectedSessionPath === localId ? created.sessionPath : state.selectedSessionPath,
           unsavedSessions: replacePath(state.unsavedSessions, projectId, localId, created.sessionPath),
+          // A dialog this session asked while it was still being created arrived
+          // addressed to nobody: pi reveals its session file only on the first
+          // `get_state`, so the request was published before the path existed.
+          // The path is written onto it with the swap below, which is what keeps
+          // its card in the composer seat — the rule that seats a card reads an
+          // empty address as "the session being created", and this one has just
+          // stopped being that.
+          pendingUiRequests: state.pendingUiRequests.map((item) =>
+            item.sessionPath === "" ? { ...item, sessionPath: created.sessionPath } : item,
+          ),
         }));
         return created.sessionPath;
       })
@@ -1309,23 +1344,27 @@ export const actions = {
    */
   markSessionSettled(sessionPath: string): void {
     const before = appStore.get();
-    const watching = before.selectedSessionPath === sessionPath;
-    // Only a task that was actually running can finish. Adopting a session that
-    // settles without this tab having seen it start (a reload mid-run, a
-    // session running elsewhere) is not a state change, and announcing it would
-    // be inventing one.
-    const wasRunning = before.sessionActivity[sessionPath] === "ongoing";
+    // The dot is keyed to selection alone, because opening a session is what
+    // clears it: it answers "is this the session on screen", not "is the user
+    // at the screen".
+    const selected = before.selectedSessionPath === sessionPath;
     appStore.update((state) => {
       const sessionActivity = { ...state.sessionActivity };
-      if (watching) delete sessionActivity[sessionPath];
+      if (selected) delete sessionActivity[sessionPath];
       else sessionActivity[sessionPath] = "done";
       return { ...state, sessionActivity };
     });
 
-    // The completion *notice* asks whether the user can see the session; the
-    // sidebar's "done" dot asks whether they might look at it next. They
-    // coincide here: nothing to announce about a result already on screen.
-    if (!watching && wasRunning) actions.notifyTaskFinished(sessionPath);
+    // The completion *notice* asks the stricter question — is the user at that
+    // screen at all — so a selected session in a hidden tab, or in a window the
+    // user has left for another app, is exactly the case it exists for. Reading
+    // selection as "watching" silenced precisely those finishes.
+    //
+    // Nothing else is asked of this frame. `agent_settled` is live news (the
+    // stream replays no history), so a finish that arrives is one that just
+    // happened, whether or not this tab saw it start: requiring the start only
+    // silenced the reload-mid-run case instead of reporting it.
+    if (!selected || !pageIsAttended()) actions.notifyTaskFinished(sessionPath);
   },
 
   /**
@@ -1341,9 +1380,17 @@ export const actions = {
     // may even have reloaded), and a click that lands later still has to know
     // which workspace to switch to along with the conversation.
     const owner = projectIdOfSession(state, sessionPath);
+    // The app names itself in the title, because on the web that is the only
+    // line of the notice it owns: the platform draws the origin above it from
+    // the address, and that would otherwise be the only name the banner carries.
+    // The session moves to the body, which is where the reader asking "which
+    // one finished?" looks anyway.
+    const sessionTitle = findSessionTitle(state, sessionPath);
     showNotification(
-      findSessionTitle(state, sessionPath) ?? "pi-web-simple",
-      tr()("notification.taskFinished"),
+      APP_NAME,
+      sessionTitle === null
+        ? tr()("notification.taskFinished")
+        : tr()("notification.taskFinishedIn", { title: sessionTitle }),
       sessionPath,
       () => {
         // Opening the session is the useful answer to "which one finished?".
@@ -1643,7 +1690,9 @@ export const actions = {
       if (index < 0) {
         return { ...state, pendingUiRequests: [...state.pendingUiRequests, pending] };
       }
-      // Same dialog, now with an address: keep the path for the jump line.
+      // Same dialog, now with an address: the address is what seats its card
+      // (`pendingUiForSession` never guesses one), so the real path is taken as
+      // soon as it arrives and never given back.
       const existing = state.pendingUiRequests[index];
       if (existing === undefined || existing.sessionPath !== "" || pending.sessionPath === "") {
         return state;

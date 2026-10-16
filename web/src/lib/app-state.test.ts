@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // below pin the Chinese wording, so fix the host locale here.
 vi.stubGlobal("navigator", { language: "zh-CN" });
 import { api } from "./api.ts";
+import { APP_NAME } from "./brand.ts";
 import {
   actions,
   appStore,
@@ -148,6 +149,29 @@ describe("draft sessions", () => {
     // tracked under project-1 until the disk list includes it, which is what
     // keeps its row in the sidebar when the user looks elsewhere.
     expect(appStore.get().unsavedSessions).toEqual({ "project-1": [REAL_PATH] });
+  });
+
+  it("addresses a dialog that arrived before the session had a file", async () => {
+    const create = deferredCreate();
+    actions.startDraftSession("project-1");
+
+    // The extension asks in the window before pi names its session file
+    // (`session_start` lands ahead of `get_state`), so the request reaches this
+    // tab addressed to nobody — and it can only be this session's: the draft on
+    // screen is the only session being created.
+    const asked = { type: "extension_ui_request" as const, id: "ui_1", method: "confirm" };
+    actions.enqueueUiRequest({ sessionPath: "", request: asked });
+
+    create.resolve({ sessionPath: REAL_PATH, sessionId: "s1", projectPath: "/home/me/proj", prewarmed: false, presetId: "standard" });
+
+    // The path is written onto it with the swap, so the card the draft is
+    // holding on to stays in the composer seat instead of being read as some
+    // other session's dialog.
+    await vi.waitFor(() => {
+      expect(appStore.get().pendingUiRequests).toEqual([
+        { sessionPath: REAL_PATH, request: asked },
+      ]);
+    });
   });
 
   it("keeps a running session tracked after the user moves on", async () => {
@@ -1062,13 +1086,16 @@ describe("task-finished notifications", () => {
     actions.emitSessionEvent(PATH, { type: "agent_settled" });
 
     expect(shownNotifications).toHaveLength(1);
+    // The app's name is the title, because that is the one line of the notice
+    // this page owns — the platform puts the origin above it.
+    expect(shownNotifications[0]?.title).toBe(APP_NAME);
     expect(shownNotifications[0]?.options?.body).toBe("会话任务已完成");
     // One slot per session, so a second finish replaces the first instead of
     // stacking a duplicate of the same news.
     expect(shownNotifications[0]?.options?.tag).toBe(PATH);
   });
 
-  it("names the session the list knows it by", () => {
+  it("names the session in the body", () => {
     setEnabled(true);
     appStore.update((state) => ({
       ...state,
@@ -1077,15 +1104,17 @@ describe("task-finished notifications", () => {
     actions.emitSessionEvent(PATH, { type: "agent_start" });
     actions.emitSessionEvent(PATH, { type: "agent_settled" });
 
-    expect(shownNotifications[0]?.title).toBe("修复登录问题");
+    expect(shownNotifications[0]?.title).toBe(APP_NAME);
+    expect(shownNotifications[0]?.options?.body).toBe("修复登录问题 · 会话任务已完成");
   });
 
-  it("falls back to the app name when no title is loaded", () => {
+  it("falls back to the bare sentence when the list does not know the session", () => {
     setEnabled(true);
     actions.emitSessionEvent(PATH, { type: "agent_start" });
     actions.emitSessionEvent(PATH, { type: "agent_settled" });
 
-    expect(shownNotifications[0]?.title).toBe("pi-web-simple");
+    expect(shownNotifications[0]?.title).toBe(APP_NAME);
+    expect(shownNotifications[0]?.options?.body).toBe("会话任务已完成");
   });
 
   it("does not announce a task the user is watching", () => {
@@ -1097,13 +1126,28 @@ describe("task-finished notifications", () => {
     expect(shownNotifications).toHaveLength(0);
   });
 
-  it("does not invent a finish for a task it never saw start", () => {
+  it("announces a task in the session the user selected and then walked away from", () => {
     setEnabled(true);
-    // A session adopted mid-run settles without this tab having seen a start;
-    // that is not a state change, so there is nothing to report.
+    actions.selectSession(PATH);
+    // The session stays open in the reading pane; the tab is merely not the one
+    // on screen. That is the finish the notice exists for.
+    vi.stubGlobal("document", { visibilityState: "hidden", hasFocus: () => false });
+    actions.emitSessionEvent(PATH, { type: "agent_start" });
     actions.emitSessionEvent(PATH, { type: "agent_settled" });
 
-    expect(shownNotifications).toHaveLength(0);
+    expect(shownNotifications).toHaveLength(1);
+    // No dot is left behind on the session they have open: the mark answers
+    // "which session do I still have to open", and this one already is.
+    expect(appStore.get().sessionActivity[PATH]).toBeUndefined();
+  });
+
+  it("announces a finish it never saw start", () => {
+    setEnabled(true);
+    // A reload mid-run, or a task run from somewhere else: the settle frame is
+    // live news either way, so this tab has a finish to report.
+    actions.emitSessionEvent(PATH, { type: "agent_settled" });
+
+    expect(shownNotifications).toHaveLength(1);
   });
 
   it("stays silent when the browser has denied permission", () => {

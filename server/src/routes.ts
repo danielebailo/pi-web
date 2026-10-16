@@ -97,9 +97,12 @@ import { readSessionPlanActive, planActiveOfEntries } from "./session-plan.ts";
 import { assertAllowedSessionPath, getSessionRoot, sessionDirFor } from "./session-path.ts";
 import { readSessionSnapshot } from "./session-reader.ts";
 import {
+  collectSessionImages,
+  isLiveImageVersion,
   readSessionImage,
   sessionImageVersion,
   withToolResultImageUrls,
+  type SessionImage,
 } from "./session-images.ts";
 import { setSessionTitle } from "./session-title.ts";
 import { listSessions } from "./sessions.ts";
@@ -166,6 +169,25 @@ function json(res: ServerResponse, status: number, payload: unknown): void {
     "content-length": Buffer.byteLength(text),
   });
   res.end(text);
+}
+
+/**
+ * One image's bytes on the wire, under a URL that names them.
+ *
+ * The URL carries the version the bytes were current for, so they cannot change
+ * under it and the browser may keep them as long as it likes. The type header is
+ * a promise about the body, so a body that is not really that image must not be
+ * allowed to claim otherwise.
+ */
+function sendImage(res: ServerResponse, image: SessionImage): void {
+  const bytes = Buffer.from(image.data, "base64");
+  res.writeHead(200, {
+    "content-type": image.mimeType,
+    "content-length": bytes.byteLength,
+    "cache-control": "private, max-age=31536000, immutable",
+    "x-content-type-options": "nosniff",
+  });
+  res.end(bytes);
 }
 
 async function readJsonBody(req: IncomingMessage, limit = 32 * 1024 * 1024): Promise<unknown> {
@@ -1547,26 +1569,43 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
   });
 
   /**
-   * The transcript, served from disk when no process is running.
+   * The transcript, served from the file whenever the file can answer it.
    *
    * Switching to a session is the single most latency-sensitive action in the
-   * UI, and it used to spawn pi (1.5–3.2s) just to read a file. A resident
-   * session still answers from memory — it is authoritative there, and may hold
-   * turns that have not been flushed yet — but everything else is read directly.
+   * UI, and it used to spawn pi (1.5–3.2s) just to read a file. Only a process
+   * that is *mid-turn* is asked now: memory is authoritative while the agent
+   * runs, but pi appends each committed entry to the session file as it lands,
+   * so a settled session's file already holds the same transcript — and hauling
+   * tens of megabytes of base64 back out of pi costs hundreds of milliseconds
+   * where reading the file costs a few.
    */
   route("GET", "/api/sessions/:id/messages", async ({ res, params }) => {
     const sessionPath = allowedPath(params.id!);
     const live = registry.get(sessionPath);
 
-    if (live && !live.dead) {
+    // A process with nothing on disk yet — a session pi has not written its
+    // first message for, or an unclaimed prewarm — is the other case memory has
+    // to answer, because there is no file to read.
+    if (live && !live.dead && (live.running || !existsSync(sessionPath))) {
       const messages = await callClient(live, () => live.client.getMessages());
       // pi answers this from the live session, so it already knows which user
       // messages are forkable — no need to re-derive it from the file.
       const forkPoints = await callClient(live, () => live.client.getForkMessages());
+      // A live transcript is the expensive one: it holds every picture the
+      // process still remembers, so a session that has been working all day
+      // answers with tens of megabytes of base64 — and *this* is the switch the
+      // reader makes over and over. Its pictures therefore go out as URLs as
+      // well, but they cannot be addressed in the file, because memory may hold
+      // turns the file has never seen. The handle keeps the bytes instead and the
+      // URL names that copy.
+      const version = registry.rememberLiveTranscript(
+        live.sessionPath,
+        collectSessionImages(messages),
+      );
       json(res, 200, {
         sessionPath: live.sessionPath,
         sessionId: live.sessionId,
-        messages,
+        messages: withToolResultImageUrls(messages, live.sessionPath, version),
         forkPoints,
       });
       return;
@@ -1581,9 +1620,7 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
     // The file's version is read *before* the snapshot, so a file that changed
     // underneath us produces URLs whose version no longer matches — a 404 the UI
     // heals on its next reload, rather than an ordinal pointing at the wrong
-    // picture. A live session keeps its images inline instead: its transcript
-    // comes from pi's memory and may hold turns the file has never seen, which
-    // no URL could point at.
+    // picture.
     const version = sessionImageVersion(sessionPath);
     const messages =
       version === null
@@ -1598,36 +1635,37 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
   });
 
   /**
-   * One image from a session's transcript, by its position in the file.
+   * One image from a session's transcript, by its position in it.
    *
-   * The transcript hands its tool-result pictures out as these URLs (see
+   * The transcript hands its pictures out as these URLs (see
    * `session-images.ts`), so a switch no longer ships every screenshot of a
-   * session in one response. Addressed by ordinal plus the file's mtime, which
-   * makes the bytes immutable under this URL and lets the browser keep them; a
-   * request carrying an older version than the file currently has is refused
-   * rather than answered with whatever now sits at that position.
+   * session in one response. Addressed by ordinal plus a version, which makes the
+   * bytes immutable under this URL and lets the browser keep them; a request
+   * carrying a version the transcript has moved past is refused rather than
+   * answered with whatever now sits at that position.
+   *
+   * The version also says *where* the bytes are: a `live-` one names the copy the
+   * session's handle kept, anything else the file, addressed by its mtime.
    */
   route("GET", "/api/sessions/:id/image/:index", async ({ res, params, query }) => {
     const sessionPath = allowedPath(params.id!);
     const index = Number(params.index);
     if (!Number.isSafeInteger(index) || index < 0) throw notFound("图片不存在");
     const version = query.get("v");
+
+    if (version !== null && isLiveImageVersion(version)) {
+      const live = registry.readLiveImage(sessionPath, version, index);
+      if (live === null) throw notFound("图片不存在");
+      sendImage(res, live);
+      return;
+    }
+
     if (version !== null && sessionImageVersion(sessionPath) !== version) {
       throw notFound("图片不存在");
     }
     const image = readSessionImage(sessionPath, index);
     if (image === null) throw notFound("图片不存在");
-    const bytes = Buffer.from(image.data, "base64");
-    res.writeHead(200, {
-      "content-type": image.mimeType,
-      "content-length": bytes.byteLength,
-      // The URL names a file version, so these bytes can never change under it.
-      "cache-control": "private, max-age=31536000, immutable",
-      // The type above is a promise about the bytes, and a body that is not
-      // really that image must not be allowed to say otherwise.
-      "x-content-type-options": "nosniff",
-    });
-    res.end(bytes);
+    sendImage(res, image);
   });
 
   /**

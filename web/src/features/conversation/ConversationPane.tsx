@@ -25,7 +25,7 @@ import { QuestionCard } from "./QuestionCard.tsx";
 import { QuestionComposer } from "./QuestionComposer.tsx";
 import { PendingQuestions } from "./PendingQuestions.tsx";
 import { QueueDock } from "./QueueDock.tsx";
-import { askUserQuestions } from "./question-model.ts";
+import { askUserQuestions, pendingUiForSession } from "./question-model.ts";
 import { SessionStats } from "./SessionStats.tsx";
 import { MessageList } from "./MessageList.tsx";
 import { ConversationWidthControls } from "./ConversationWidthControls.tsx";
@@ -468,19 +468,10 @@ export function ConversationPane() {
 
   // A waiting dialog is a hard block on its pi process, so it takes the
   // composer's seat rather than floating over the page: the answer goes where
-  // the next message would have been typed. The open session's own request
-  // wins the seat; a request from another session still appears, because that
-  // process is just as blocked, and carries a jump line instead.
-  const pendingUi =
-    state.pendingUiRequests.find((item) => item.sessionPath === sessionPath) ??
-    state.pendingUiRequests[0] ??
-    null;
-  const pendingSession =
-    pendingUi && pendingUi.sessionPath !== sessionPath
-      ? Object.values(state.sessions)
-          .flat()
-          .find((candidate) => candidate.path === pendingUi.sessionPath)
-      : undefined;
+  // the next message would have been typed. Only the open session's own dialog
+  // takes that seat — another session's is left to its sidebar row
+  // (`pendingUiForSession` says why).
+  const pendingUi = pendingUiForSession(state.pendingUiRequests, sessionPath);
   // A batched question gets the composer that can hold several answers; every
   // other dialog keeps the single-question card. Both take the composer seat,
   // so the choice is one branch at the render site and nothing else changes.
@@ -499,11 +490,7 @@ export function ConversationPane() {
         title={typeof pendingUi.request.title === "string" ? pendingUi.request.title : undefined}
         timeoutMs={typeof pendingUi.request.timeout === "number" ? pendingUi.request.timeout : null}
         draftKey={pendingUi.request.id}
-        sessionLabel={pendingSession?.title}
         onOpenPlan={openPlanFromReview}
-        onOpenSession={
-          pendingSession ? () => actions.selectSession(pendingUi.sessionPath) : undefined
-        }
         onSubmit={async (decision) => {
           await api.respondToUiRequest(pendingUi.request.id, decision);
           actions.dismissUiRequest(pendingUi.request.id);
@@ -519,10 +506,6 @@ export function ConversationPane() {
         // Same reason as above: the id is the identity, not the path.
         key={pendingUi.request.id}
         pending={pendingUi}
-        sessionLabel={pendingSession?.title}
-        onOpenSession={
-          pendingSession ? () => actions.selectSession(pendingUi.sessionPath) : undefined
-        }
       />
     )
   ) : null;

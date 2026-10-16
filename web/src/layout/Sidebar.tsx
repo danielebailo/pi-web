@@ -8,7 +8,7 @@ import { ViewOptionsMenu } from "../features/projects/ViewOptionsMenu.tsx";
 import { anchorBelow, type MenuAnchor } from "../features/projects/SidebarMenu.tsx";
 import { useSidebarDrag } from "../features/projects/use-sidebar-drag.ts";
 import { actions, appStore, useT } from "../lib/app-state.ts";
-import { PI_MARK_URL } from "../lib/brand.ts";
+import { APP_NAME, PI_MARK_URL } from "../lib/brand.ts";
 import { buildProjectTree } from "../lib/project-tree.ts";
 import { hasAnyUpdate } from "../lib/updates.ts";
 import { useStore } from "../lib/store.ts";
@@ -74,7 +74,7 @@ export function Sidebar() {
 
       <div className={styles.brand} data-window-drag>
         <img className={styles.brandMark} src={PI_MARK_URL} alt="" draggable={false} />
-        <span className={styles.brandName}>pi-web-simple</span>
+        <span className={styles.brandName}>{APP_NAME}</span>
       </div>
 
       <div className={styles.primaryAction}>

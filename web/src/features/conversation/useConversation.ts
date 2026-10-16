@@ -78,6 +78,26 @@ export interface ConversationView {
    * mirrors the trailing undelivered user rows one-to-one.
    */
   queue: QueuedPrompt[];
+  /**
+   * Wall-clock time of the newest message this browser sent this session, or 0
+   * when it has sent none.
+   *
+   * `MessageList` watches it: the composer is docked at the bottom of the
+   * window, so a reader who scrolled up to re-read something and then typed a
+   * message has asked to see what happens next — the send brings the transcript
+   * back to the tail. It is deliberately *not* "a user message appeared": a
+   * message pi recorded from the terminal, or a row that arrives on a reload,
+   * grows `messages` without touching this, and a reader who is not following
+   * must not be dragged down by someone else's message. Every send from this
+   * browser goes through this hook — a prompt, a steer or a follow-up, a
+   * command, a retry, an answer to a pending question — so one value covers
+   * them all instead of each call site remembering to ask.
+   *
+   * Only the *change* means anything, and it is never reset, so a session switch
+   * cannot read as a send (a reset would pin the next session's reader to the
+   * bottom, which is not something they asked for).
+   */
+  sentAt: number;
   toolExecutions: Record<string, ToolExecution>;
   /**
    * Whether this session's agent loop is running right now.
@@ -190,6 +210,7 @@ const emptyView: ConversationView = {
   partial: null,
   undeliveredPrompts: 0,
   queue: [],
+  sentAt: 0,
   toolExecutions: {},
   isStreaming: false,
   compacting: false,
@@ -499,6 +520,14 @@ export function useConversation(sessionPath: string | null): ConversationApi {
    */
   const queueRef = useRef<QueuedPrompt[]>([]);
   /**
+   * The newest send from this browser; see `ConversationView.sentAt`.
+   *
+   * Deliberately not reset with the rest of the session state below: the number
+   * is meaningless outside the session that produced it, and going backwards
+   * would look like a send to whoever is comparing it.
+   */
+  const sentAtRef = useRef(0);
+  /**
    * Whether the next user message pi records belongs to an extension command.
    *
    * Set while `runCommand` is in flight, cleared by the first user `message_end`
@@ -574,6 +603,7 @@ export function useConversation(sessionPath: string | null): ConversationApi {
       // can drift from the list it describes.
       undeliveredPrompts,
       queue: [...queueRef.current],
+      sentAt: sentAtRef.current,
       toolExecutions: { ...toolsRef.current },
       isStreaming: streamingRef.current,
       compacting: compactingRef.current,
@@ -990,6 +1020,11 @@ export function useConversation(sessionPath: string | null): ConversationApi {
           ? null
           : { id: crypto.randomUUID(), text: message, images, mode };
       if (queueEntry) queueRef.current = [...queueRef.current, queueEntry];
+      // Stamped with the optimistic turn, so the transcript can put the reader
+      // back on the floor on the same frame that turn is painted — see
+      // `ConversationView.sentAt`. A refused send keeps the stamp: the reader
+      // is already at the bottom, and taking it back would move them again.
+      sentAtRef.current = Date.now();
       publish();
 
       try {
@@ -1092,6 +1127,11 @@ export function useConversation(sessionPath: string | null): ConversationApi {
       // Armed before the request, because pi may record the command's message
       // and emit it before the RPC reply lands.
       adoptUserRef.current = true;
+      // A command is a message too, so it goes through the same stamp: the row
+      // pi records for it arrives on the stream a beat later, and reading it
+      // needs the transcript back at the tail (see `ConversationView.sentAt`).
+      sentAtRef.current = Date.now();
+      publish();
       try {
         await api.prompt(sessionPath, message, images);
         return true;

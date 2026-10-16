@@ -57,6 +57,7 @@ export const zhCN = {
 
   // --- notifications --------------------------------------------------------
   "notification.taskFinished": "会话任务已完成",
+  "notification.taskFinishedIn": "{title} · 会话任务已完成",
 
   // --- sidebar --------------------------------------------------------------
   "sidebar.newSession": "新会话",
@@ -192,6 +193,7 @@ export const zhCN = {
   "turnChanges.missing": "这轮改动的内容已不可用",
   "turnChanges.oversized": "文件过大，无法显示改动",
   "turnChanges.noDiff": "这次调用没有可显示的改动",
+  "turnChanges.truncated": "只显示前 {count} 行",
 
   // --- conversation · retry / todo -----------------------------------------
   "retry.waiting": "等待重试模型请求",
@@ -308,7 +310,6 @@ export const zhCN = {
   "question.placeholder": "输入回答…",
   "question.yes": "是",
   "question.no": "否",
-  "question.goTo": "前往",
   "question.expand": "展开问题",
   "question.collapse": "收起问题",
   "question.cancelTitle": "取消（Esc）",
@@ -884,6 +885,7 @@ export const en: Record<MessageKey, string> = {
   "settings.titleModel.off": "Off",
 
   "notification.taskFinished": "The session task has finished",
+  "notification.taskFinishedIn": "{title} · The session task has finished",
 
   "sidebar.newSession": "New session",
   "sidebar.newSessionIn": "New session in “{title}”",
@@ -1009,6 +1011,7 @@ export const en: Record<MessageKey, string> = {
   "turnChanges.missing": "The contents of this turn's changes are no longer available",
   "turnChanges.oversized": "File too large; changes cannot be shown",
   "turnChanges.noDiff": "This call recorded no comparison to show",
+  "turnChanges.truncated": "Showing the first {count} lines",
 
   "retry.waiting": "Waiting to retry the model request",
   "retry.retrying": "Retrying the model request",
@@ -1118,7 +1121,6 @@ export const en: Record<MessageKey, string> = {
   "question.placeholder": "Type an answer…",
   "question.yes": "Yes",
   "question.no": "No",
-  "question.goTo": "Go",
   "question.expand": "Expand question",
   "question.collapse": "Collapse question",
   "question.cancelTitle": "Cancel (Esc)",

@@ -24,16 +24,9 @@ export interface PendingQuestionsProps {
   questions: readonly PendingQuestion[];
   /** Hand the composed reply back; the caller sends it as a user message. */
   onAnswer: (text: string) => Promise<void> | void;
-  sessionLabel?: string;
-  onOpenSession?: () => void;
 }
 
-export function PendingQuestions({
-  questions,
-  onAnswer,
-  sessionLabel,
-  onOpenSession,
-}: PendingQuestionsProps) {
+export function PendingQuestions({ questions, onAnswer }: PendingQuestionsProps) {
   const t = useT();
   const [open, setOpen] = useState(false);
 
@@ -80,8 +73,6 @@ export function PendingQuestions({
               // cancel: closing the strip is the whole refusal, and the question
               // simply stays here.
               cancellable={false}
-              sessionLabel={sessionLabel}
-              onOpenSession={onOpenSession}
               onSubmit={(decision) => {
                 if (!("answers" in decision)) return undefined;
                 // The reply is composed here, where the questions and the

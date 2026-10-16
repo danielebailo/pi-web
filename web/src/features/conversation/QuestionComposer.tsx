@@ -80,10 +80,6 @@ export interface QuestionComposerProps {
    * there is nothing stable to key it by, which just means the card forgets.
    */
   draftKey?: string;
-  /** Shown above the title when the request belongs to a session that is not the open one. */
-  sessionLabel?: string;
-  /** Jumps to that session; offered only alongside `sessionLabel`. */
-  onOpenSession?: () => void;
   /**
    * Show this review's plan in the right sidebar, returning whether it landed.
    *
@@ -119,8 +115,6 @@ export function QuestionComposer({
   embedded = false,
   requestId,
   draftKey,
-  sessionLabel,
-  onOpenSession,
   onOpenPlan,
 }: QuestionComposerProps) {
   const t = useT();
@@ -375,8 +369,6 @@ export function QuestionComposer({
         error={error}
         embedded={embedded}
         cancellable={cancellable}
-        {...(sessionLabel === undefined ? {} : { sessionLabel })}
-        {...(onOpenSession === undefined ? {} : { onOpenSession })}
         {...(planTarget === null || onOpenPlan === undefined
           ? {}
           : {
@@ -420,16 +412,6 @@ export function QuestionComposer({
       >
         <header className={card.header}>
           <div className={card.heading}>
-            {sessionLabel ? (
-              <div className={card.eyebrow}>
-                <span className={card.eyebrowText}>{sessionLabel}</span>
-                {onOpenSession ? (
-                  <button type="button" className={card.eyebrowAction} onClick={onOpenSession}>
-                    {t("question.goTo")}
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
             <h2 className={card.title}>{title}</h2>
           </div>
           <div className={card.headerActions}>
