@@ -13,6 +13,14 @@
  * Placeholders are `{name}` and are filled by `translator()` in `index.ts`.
  */
 export const zhCN = {
+  "picker.newFolder": "新建文件夹",
+  "picker.folderName": "文件夹名称",
+  "picker.create": "创建",
+  "picker.creating": "创建中…",
+  "picker.createExists": "已存在同名文件或文件夹。",
+  "picker.createDenied": "你没有在此位置创建文件夹的权限。",
+  "picker.createInvalid": "请输入一个文件夹名称，不要使用路径分隔符或非法字符。",
+  "picker.createFailed": "无法创建文件夹，请检查上级目录后重试。",
   "approval.title": "审批",
   "approval.mode": "审批模式",
   "approval.ask": "逐次确认",
@@ -855,6 +863,14 @@ export type MessageKey = keyof typeof zhCN;
 export type UiLanguage = "zh-CN" | "en";
 
 export const en: Record<MessageKey, string> = {
+  "picker.newFolder": "New folder",
+  "picker.folderName": "Folder name",
+  "picker.create": "Create",
+  "picker.creating": "Creating…",
+  "picker.createExists": "A file or folder with this name already exists.",
+  "picker.createDenied": "You do not have permission to create a folder here.",
+  "picker.createInvalid": "Enter one folder name, without path separators or invalid characters.",
+  "picker.createFailed": "Could not create the folder. Check the parent directory and try again.",
   "approval.title": "Approvals",
   "approval.mode": "Approval mode",
   "approval.ask": "Ask",

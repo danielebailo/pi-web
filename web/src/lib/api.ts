@@ -88,6 +88,9 @@ export const api = {
   /** Convenience roots for the directory picker. */
   startLocations: () => request<StartLocation[]>("/api/fs/locations"),
 
+  createDirectory: (parent: string, name: string) =>
+    request<{ path: string }>("/api/fs/directories", { method: "POST", body: JSON.stringify({ parent, name }) }),
+
   /** Lists sub-directories so the picker can return a real absolute path. */
   listDirectories: (path?: string) =>
     request<DirListing>(

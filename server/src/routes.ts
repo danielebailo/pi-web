@@ -30,7 +30,7 @@ import {
   type McpSecretRow,
   type McpServerDraft,
 } from "./mcp.ts";
-import { listDirectories, startLocations } from "./fs-browse.ts";
+import { createDirectory, listDirectories, startLocations } from "./fs-browse.ts";
 import {
   GitError,
   gitCheckout,
@@ -1195,6 +1195,11 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
 
   route("GET", "/api/fs/locations", async ({ res }) => {
     json(res, 200, await startLocations());
+  });
+
+  route("POST", "/api/fs/directories", async ({ res, body }) => {
+    const input = asObject(body);
+    json(res, 201, await createDirectory(requireString(input, "parent"), requireString(input, "name")));
   });
 
   route("GET", "/api/fs/list", async ({ res, query }) => {

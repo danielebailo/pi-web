@@ -112,6 +112,19 @@ describe("health", () => {
   });
 });
 
+describe("create folder API", () => {
+  it("creates one child and rejects overwrites, traversal and missing names", async () => {
+    const parent = join(projectRoot, "folder-api");
+    await mkdir(parent, { recursive: true });
+    const made = await post("/api/fs/directories", { parent, name: "new workspace" });
+    expect(made.status).toBe(201);
+    expect(made.body.path).toBe(join(parent, "new workspace"));
+    expect((await post("/api/fs/directories", { parent, name: "new workspace" })).status).toBe(409);
+    expect((await post("/api/fs/directories", { parent, name: "../escape" })).status).toBe(400);
+    expect((await post("/api/fs/directories", { parent })).status).toBe(400);
+  });
+});
+
 describe("approval api", () => {
   beforeEach(() => { initializeApprovals(); updateApproval({ mode: "ask" }); });
   it("starts in Ask and requires explicit confirmation to disable the gate", async () => {
