@@ -60,6 +60,16 @@ function expired(entry: Entry, now: number): boolean {
   return now - entry.receivedAt > timeout;
 }
 
+// Whitelist response fields: a browser payload must not override the RPC
+// envelope's type/id or turn a confirmation into an unrelated command.
+function plainResponse(request: PendingUiDialog["request"], payload: Record<string, unknown>): Record<string, unknown> | null {
+  if (payload.cancelled === true) return { cancelled: true };
+  if (request.method === "confirm") return typeof payload.confirmed === "boolean" ? { confirmed: payload.confirmed } : null;
+  if (typeof payload.value !== "string") return null;
+  if (request.method === "select" && (!Array.isArray(request.options) || !request.options.includes(payload.value))) return null;
+  return { value: payload.value };
+}
+
 export class PendingUiRequests {
   private readonly entries = new Map<string, Entry>();
 
@@ -103,13 +113,13 @@ export class PendingUiRequests {
   async answer(id: string, payload: Record<string, unknown>): Promise<AnswerOutcome> {
     const entry = this.entries.get(id);
     if (!entry) return "unknown";
-    if (entry.handle.dead) {
+    if (entry.handle.dead || expired(entry, Date.now())) {
       this.entries.delete(id);
       return "unknown";
     }
     const body = entry.codec === "ask_user"
       ? encodeAskUserResponse(payload, decodeAskUserBatch(entry.request.title)?.questions)
-      : payload;
+      : plainResponse(entry.request, payload);
     if (body === null) return "invalid";
     this.entries.delete(id);
     sendRawCommand(entry.handle.client, { type: "extension_ui_response", id, ...body });

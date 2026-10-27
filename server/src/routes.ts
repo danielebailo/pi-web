@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { approvalView, updateApproval } from "./approval.ts";
 import { createReadStream, existsSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { homedir } from "node:os";
@@ -842,6 +843,13 @@ export function createRequestHandler(deps: RouteDeps): (req: IncomingMessage, re
   // is, and guessing from a path prefix would be wrong on every other machine.
   route("GET", "/api/env", ({ res }) => {
     json(res, 200, { home: homedir() });
+  });
+
+  // Approval changes are UI actions, not model-callable extension commands.
+  route("GET", "/api/approval", ({ res }) => { json(res, 200, approvalView()); });
+  route("PUT", "/api/approval", ({ res, body }) => {
+    try { json(res, 200, updateApproval(asObject(body))); }
+    catch (error) { throw badRequest((error as Error).message); }
   });
 
   // --- settings -------------------------------------------------------------

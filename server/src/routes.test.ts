@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventBus } from "./bus.ts";
+import { initializeApprovals, updateApproval } from "./approval.ts";
 import { resetDefaultComposerCache } from "./composer.ts";
 import { resetSessionOpenCache } from "./session-open.ts";
 import { MINIMAL_SYSTEM_PROMPT } from "./presets.ts";
@@ -108,6 +109,20 @@ describe("health", () => {
     const res = await api("/api/env");
     expect(res.status).toBe(200);
     expect(res.body.home).toBe(homedir());
+  });
+});
+
+describe("approval api", () => {
+  beforeEach(() => { initializeApprovals(); updateApproval({ mode: "ask" }); });
+  it("starts in Ask and requires explicit confirmation to disable the gate", async () => {
+    expect((await api("/api/approval")).body.config.mode).toBe("ask");
+    expect((await api("/api/approval", { method: "PUT", body: JSON.stringify({ mode: "off" }) })).status).toBe(400);
+    expect((await api("/api/approval", { method: "PUT", body: JSON.stringify({ mode: "off", confirmOff: true }) })).body.config.mode).toBe("off");
+  });
+  it("validates settings and supports Smart and reviewer selection", async () => {
+    const result = await api("/api/approval", { method: "PUT", body: JSON.stringify({ mode: "smart", classifierModel: "provider/model", language: "zh-CN" }) });
+    expect(result.body.config).toMatchObject({ mode: "smart", classifierModel: "provider/model", language: "zh-CN" });
+    expect((await api("/api/approval", { method: "PUT", body: JSON.stringify({ mode: "invalid" }) })).status).toBe(400);
   });
 });
 

@@ -13,6 +13,21 @@
  * Placeholders are `{name}` and are filled by `translator()` in `index.ts`.
  */
 export const zhCN = {
+  "approval.title": "审批",
+  "approval.mode": "审批模式",
+  "approval.ask": "逐次确认",
+  "approval.smart": "智能审批",
+  "approval.off": "关闭",
+  "approval.description": "逐次确认会询问可能修改数据的操作。智能审批仅自动审查工作区内低风险的文档修改；命令、脚本和 MCP 操作始终需要人工确认。",
+  "approval.confirmOff": "关闭所有网页会话的操作审批？工具将不再需要确认。",
+  "approval.offWarning": "审批已关闭",
+  "approval.unavailable": "审批不可用；请检查审批设置",
+  "approval.model": "审查模型",
+  "approval.modelNote": "留空使用会话模型；或填写 provider/model。仅智能审批使用，会产生额外模型请求。",
+  "approval.timeout": "确认等待时间",
+  "approval.timeoutNote": "超时、取消或连接中断时不允许执行。",
+  "approval.seconds": "{seconds} 秒",
+  "approval.limit": "此设置影响所有网页会话，不影响终端 Pi。它不是操作系统沙箱。",
   // --- settings · general ---------------------------------------------------
   "settings.appearance.title": "外观",
   "settings.appearance.light": "浅色",
@@ -840,6 +855,21 @@ export type MessageKey = keyof typeof zhCN;
 export type UiLanguage = "zh-CN" | "en";
 
 export const en: Record<MessageKey, string> = {
+  "approval.title": "Approvals",
+  "approval.mode": "Approval mode",
+  "approval.ask": "Ask",
+  "approval.smart": "Smart",
+  "approval.off": "Off",
+  "approval.description": "Ask confirms potentially modifying actions. Smart reviews only low-risk document edits within the workspace; commands, scripts and MCP calls always require your confirmation.",
+  "approval.confirmOff": "Disable action approvals for every web session? Tools will no longer require confirmation.",
+  "approval.offWarning": "Approvals are off",
+  "approval.unavailable": "Approval unavailable; check approval settings",
+  "approval.model": "Review model",
+  "approval.modelNote": "Empty follows the session model, or enter provider/model. Used only in Smart mode; adds model requests.",
+  "approval.timeout": "Confirmation timeout",
+  "approval.timeoutNote": "Timeout, cancellation or loss of the approval channel never grants permission.",
+  "approval.seconds": "{seconds} seconds",
+  "approval.limit": "Applies to all web sessions, not terminal Pi. This is not an operating-system sandbox.",
   "settings.appearance.title": "Appearance",
   "settings.appearance.light": "Light",
   "settings.appearance.dark": "Dark",

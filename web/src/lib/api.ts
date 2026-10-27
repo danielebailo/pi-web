@@ -82,6 +82,9 @@ function imageField(images: ImageBlock[]): { images: ImageBlock[] } | Record<str
 }
 
 export const api = {
+  getApproval: () => request<import("../features/approvals/approval-store.ts").ApprovalView>("/api/approval"),
+  updateApproval: (patch: Partial<import("../features/approvals/approval-store.ts").ApprovalConfig> & { confirmOff?: boolean }) =>
+    request<import("../features/approvals/approval-store.ts").ApprovalView>("/api/approval", { method: "PUT", body: JSON.stringify(patch) }),
   /** Convenience roots for the directory picker. */
   startLocations: () => request<StartLocation[]>("/api/fs/locations"),
 
